@@ -1,0 +1,402 @@
+/**
+ * 标签自进化核心类
+ * 用于检测重复、可拆分、冷门标签，并执行拆分/合并操作
+ */
+
+import { StorageAdapter, TABLES } from '../storage/base-storage';
+import { getDefaultStorage } from '../adapter-factory';
+import { calculateSimilarity } from '../utils/similarity';
+import { BitableRecord } from '@/lib/types';
+import { TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS, FEEDBACK_FIELDS } from '../feishu/constants';
+
+/**
+ * 标签记录
+ */
+interface TagRecord {
+  record_id: string;
+  table: 'tag1' | 'tag2' | 'tag3';
+  fields: {
+    name: string;
+    level: 'Tag1' | 'Tag2' | 'Tag3';
+    definition?: string;
+    status?: string;
+    createdBy?: string;
+    usageCount?: number;
+    largeTenantCount?: number;
+    largeTenantRatio?: number;
+  };
+}
+
+/**
+ * 重复标签报告
+ */
+export interface TagDuplicate {
+  tags: [TagRecord, TagRecord];
+  similarity: number;
+  suggestion: '合并';
+  affectedFeedbackCount: number;
+}
+
+/**
+ * 可拆分标签报告
+ */
+export interface TagSplittable {
+  tag: TagRecord;
+  tag3Count: number;
+  distribution: Array<{ name: string; count: number; percentage: number }>;
+  suggestion: string;
+  affectedFeedbackCount: number;
+}
+
+/**
+ * 冷门标签报告
+ */
+export interface TagCold {
+  tag: TagRecord;
+  usageCount: number;
+  lastUsedMonths: number;
+}
+
+/**
+ * 自进化报告
+ */
+export interface EvolutionReport {
+  timestamp: number;
+  duplicates: TagDuplicate[];
+  splittables: TagSplittable[];
+  coldTags: TagCold[];
+  hotTags: TagRecord[];
+  actions: Array<{
+    type: 'merge' | 'split';
+    result: any;
+  }>;
+}
+
+/**
+ * 标签自进化类
+ */
+export class TagEvolution {
+  private storage: StorageAdapter;
+  private similarityThreshold: number;
+  private splitThreshold: number;
+
+  constructor(storage?: StorageAdapter) {
+    this.storage = storage || getDefaultStorage();
+    this.similarityThreshold = 0.85;
+    this.splitThreshold = 10;
+  }
+
+  /**
+   * 执行标签自进化分析
+   */
+  async execute(): Promise<EvolutionReport> {
+    console.log('[自进化] 开始标签自进化分析');
+
+    const report: EvolutionReport = {
+      timestamp: Date.now(),
+      duplicates: [],
+      splittables: [],
+      coldTags: [],
+      hotTags: [],
+      actions: [],
+    };
+
+    try {
+      const [tag1Records, tag2Records, tag3Records] = await Promise.all([
+        this.storage.listRecords(TABLES.TAG1),
+        this.storage.listRecords(TABLES.TAG2),
+        this.storage.listRecords(TABLES.TAG3),
+      ]);
+
+      const tag1List = tag1Records.map(r => this.toTagRecord(r, 'tag1', 'Tag1'));
+      const tag2List = tag2Records.map(r => this.toTagRecord(r, 'tag2', 'Tag2'));
+      const tag3List = tag3Records.map(r => this.toTagRecord(r, 'tag3', 'Tag3'));
+
+      console.log(`[自进化] Tag1: ${tag1List.length} 个, Tag2: ${tag2List.length} 个, Tag3: ${tag3List.length} 个`);
+
+      report.duplicates = await this.detectDuplicates(tag2List, tag3List);
+      console.log(`[自进化] 检测到 ${report.duplicates.length} 组重复标签`);
+
+      report.splittables = await this.detectSplittables(tag2List, tag3List);
+      console.log(`[自进化] 检测到 ${report.splittables.length} 个可拆分标签`);
+
+      report.coldTags = this.detectColdTags(tag1List, tag2List, tag3List);
+      console.log(`[自进化] 检测到 ${report.coldTags.length} 个冷门标签（保留不处理）`);
+
+      report.hotTags = this.detectHotTags(tag1List, tag2List, tag3List);
+      console.log(`[自进化] 检测到 ${report.hotTags.length} 个热门标签`);
+
+      return report;
+    } catch (error) {
+      console.error('[自进化] 执行失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 检测重复标签
+   */
+  private async detectDuplicates(tag2List: TagRecord[], tag3List: TagRecord[]): Promise<TagDuplicate[]> {
+    const duplicates: TagDuplicate[] = [];
+
+    const detectInList = async (list: TagRecord[]): Promise<TagDuplicate[]> => {
+      const result: TagDuplicate[] = [];
+      const activeTags = list.filter(t => t.fields.status !== 'inactive');
+
+      for (let i = 0; i < activeTags.length; i++) {
+        for (let j = i + 1; j < activeTags.length; j++) {
+          const similarity = calculateSimilarity(activeTags[i].fields.name, activeTags[j].fields.name);
+
+          if (similarity > this.similarityThreshold) {
+            const affectedCount = await this.getAffectedFeedbackCount(
+              [activeTags[i].fields.name, activeTags[j].fields.name],
+              activeTags[i].fields.level
+            );
+
+            result.push({
+              tags: [activeTags[i], activeTags[j]],
+              similarity,
+              suggestion: '合并',
+              affectedFeedbackCount: affectedCount,
+            });
+          }
+        }
+      }
+      return result;
+    };
+
+    duplicates.push(...await detectInList(tag2List));
+    duplicates.push(...await detectInList(tag3List));
+
+    return duplicates;
+  }
+
+  /**
+   * 检测可拆分标签
+   */
+  private async detectSplittables(tag2List: TagRecord[], tag3List: TagRecord[]): Promise<TagSplittable[]> {
+    const splittables: TagSplittable[] = [];
+
+    const activeTag2 = tag2List.filter(t => t.fields.status !== 'inactive');
+    const activeTag3 = tag3List.filter(t => t.fields.status !== 'inactive');
+
+    for (const tag2 of activeTag2) {
+      const tag3UnderTag2 = activeTag3.filter(t =>
+        t.fields.definition?.includes(tag2.fields.name)
+      );
+
+      if (tag3UnderTag2.length > this.splitThreshold) {
+        const distribution = this.analyzeTag3Distribution(tag3UnderTag2);
+
+        const dominantTag3 = distribution.filter(d => d.percentage > 60);
+
+        if (dominantTag3.length > 0) {
+          const affectedCount = await this.getAffectedFeedbackCount([tag2.fields.name], 'Tag2');
+
+          splittables.push({
+            tag: tag2,
+            tag3Count: tag3UnderTag2.length,
+            distribution,
+            suggestion: `建议拆分：${tag2.fields.name} → ${dominantTag3.map(d => d.name).join(', ')}`,
+            affectedFeedbackCount: affectedCount,
+          });
+        }
+      }
+    }
+
+    return splittables;
+  }
+
+  /**
+   * 检测冷门标签
+   */
+  private detectColdTags(tag1List: TagRecord[], tag2List: TagRecord[], tag3List: TagRecord[]): TagCold[] {
+    const coldTags: TagCold[] = [];
+
+    const detectInList = (list: TagRecord[]): TagCold[] => {
+      return list
+        .filter(t => t.fields.status !== 'inactive')
+        .filter(t => (t.fields.usageCount || 0) < 5)
+        .map(t => ({
+          tag: t,
+          usageCount: t.fields.usageCount || 0,
+          lastUsedMonths: 6,
+        }));
+    };
+
+    coldTags.push(...detectInList(tag1List));
+    coldTags.push(...detectInList(tag2List));
+    coldTags.push(...detectInList(tag3List));
+
+    return coldTags;
+  }
+
+  /**
+   * 检测热门标签
+   */
+  private detectHotTags(tag1List: TagRecord[], tag2List: TagRecord[], tag3List: TagRecord[]): TagRecord[] {
+    const hotTags: TagRecord[] = [];
+
+    const detectInList = (list: TagRecord[]): TagRecord[] => {
+      return list
+        .filter(t => t.fields.status !== 'inactive')
+        .filter(t => (t.fields.usageCount || 0) > 20);
+    };
+
+    hotTags.push(...detectInList(tag1List));
+    hotTags.push(...detectInList(tag2List));
+    hotTags.push(...detectInList(tag3List));
+
+    return hotTags;
+  }
+
+  /**
+   * 分析 Tag3 分布
+   */
+  private analyzeTag3Distribution(tag3List: TagRecord[]): Array<{ name: string; count: number; percentage: number }> {
+    const total = tag3List.reduce((sum, t) => sum + (t.fields.usageCount || 0), 0);
+
+    return tag3List
+      .map(t => ({
+        name: t.fields.name,
+        count: t.fields.usageCount || 0,
+        percentage: total > 0 ? ((t.fields.usageCount || 0) / total) * 100 : 0,
+      }))
+      .sort((a, b) => b.percentage - a.percentage);
+  }
+
+  /**
+   * 获取受影响的反馈数量
+   */
+  private async getAffectedFeedbackCount(tagNames: string[], level: 'Tag1' | 'Tag2' | 'Tag3'): Promise<number> {
+    try {
+      const feedbacks = await this.storage.listRecords(TABLES.FEEDBACK, {
+        pageSize: 500,
+      });
+
+      let count = 0;
+      for (const feedback of feedbacks) {
+        const tagField = level === 'Tag1' ? FEEDBACK_FIELDS.TAG1 :
+                         level === 'Tag2' ? FEEDBACK_FIELDS.TAG2 :
+                         FEEDBACK_FIELDS.TAG3;
+        const tagValue = String(feedback.fields[tagField] || '');
+
+        if (tagNames.some(name => tagValue.includes(name))) {
+          count++;
+        }
+      }
+
+      return count;
+    } catch (error) {
+      console.error('[自进化] 获取受影响反馈数量失败:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * 执行标签合并
+   */
+  async executeMerge(tag1: TagRecord, tag2: TagRecord, mergedName: string): Promise<void> {
+    console.log(`[自进化] 执行合并：${tag1.fields.name} + ${tag2.fields.name} → ${mergedName}`);
+
+    const table = tag1.table;
+    const fields = table === 'tag1' ? TAG1_FIELDS : table === 'tag2' ? TAG2_FIELDS : TAG3_FIELDS;
+
+    const mergedTag = await this.storage.createRecord(table, {
+      [fields.TAG_ID]: `${Date.now()}`,
+      [fields.NAME]: mergedName,
+      [fields.DEFINITION]: `合并自 ${tag1.fields.name} 和 ${tag2.fields.name}`,
+      [fields.USAGE_COUNT]: (tag1.fields.usageCount || 0) + (tag2.fields.usageCount || 0),
+      [fields.LARGE_TENANT_COUNT]: Math.max(tag1.fields.largeTenantCount || 0, tag2.fields.largeTenantCount || 0),
+      [fields.LARGE_TENANT_RATIO]: 0,
+      [fields.STATUS]: 'active',
+      [fields.CREATED_BY]: 'AI自进化',
+      [fields.CREATED_AT]: Date.now(),
+    });
+
+    const feedbacks = await this.storage.listRecords(TABLES.FEEDBACK, { pageSize: 500 });
+    const level = tag1.fields.level;
+    const fbField = level === 'Tag1' ? FEEDBACK_FIELDS.TAG1 :
+                    level === 'Tag2' ? FEEDBACK_FIELDS.TAG2 :
+                    FEEDBACK_FIELDS.TAG3;
+
+    const affectedFeedbacks = feedbacks.filter(f => {
+      const tagValue = String(f.fields[fbField] || '');
+      return tagValue === tag1.fields.name || tagValue === tag2.fields.name;
+    });
+
+    for (const feedback of affectedFeedbacks) {
+      await this.storage.updateRecord(TABLES.FEEDBACK, feedback.record_id, {
+        [fbField]: mergedName,
+      });
+    }
+
+    await this.storage.updateRecord(table, tag1.record_id, { [fields.STATUS]: 'inactive' });
+    await this.storage.updateRecord(table, tag2.record_id, { [fields.STATUS]: 'inactive' });
+
+    console.log(`[自进化] 合并完成，已更新 ${affectedFeedbacks.length} 条反馈`);
+  }
+
+  /**
+   * 执行标签拆分
+   */
+  async executeSplit(originalTag: TagRecord, newTagNames: string[]): Promise<void> {
+    console.log(`[自进化] 执行拆分：${originalTag.fields.name} → ${newTagNames.join(', ')}`);
+
+    const table = originalTag.table;
+    const fields = table === 'tag1' ? TAG1_FIELDS : table === 'tag2' ? TAG2_FIELDS : TAG3_FIELDS;
+
+    const newTagRecords = await this.storage.batchCreateRecords(table,
+      newTagNames.map(name => ({
+        fields: {
+          [fields.TAG_ID]: `${Date.now()}-${name}`,
+          [fields.NAME]: name,
+          [fields.DEFINITION]: `拆分自 ${originalTag.fields.name}`,
+          [fields.USAGE_COUNT]: 0,
+          [fields.LARGE_TENANT_COUNT]: 0,
+          [fields.LARGE_TENANT_RATIO]: 0,
+          [fields.STATUS]: 'active',
+          [fields.CREATED_BY]: 'AI自进化',
+          [fields.CREATED_AT]: Date.now(),
+        },
+      }))
+    );
+
+    const feedbacks = await this.storage.listRecords(TABLES.FEEDBACK, { pageSize: 500 });
+    const level = originalTag.fields.level;
+    const fbField = level === 'Tag1' ? FEEDBACK_FIELDS.TAG1 :
+                    level === 'Tag2' ? FEEDBACK_FIELDS.TAG2 :
+                    FEEDBACK_FIELDS.TAG3;
+
+    const affectedFeedbacks = feedbacks.filter(f => {
+      const tagValue = String(f.fields[fbField] || '');
+      return tagValue === originalTag.fields.name;
+    });
+
+    await this.storage.updateRecord(table, originalTag.record_id, { [fields.STATUS]: 'inactive' });
+
+    console.log(`[自进化] 拆分完成，已创建 ${newTagRecords.length} 个新标签`);
+  }
+
+  /**
+   * 转换为 TagRecord
+   */
+  private toTagRecord(record: BitableRecord, table: 'tag1' | 'tag2' | 'tag3', level: 'Tag1' | 'Tag2' | 'Tag3'): TagRecord {
+    const fields = table === 'tag1' ? TAG1_FIELDS : table === 'tag2' ? TAG2_FIELDS : TAG3_FIELDS;
+
+    return {
+      record_id: record.record_id,
+      table,
+      fields: {
+        name: String(record.fields[fields.NAME] || ''),
+        level,
+        definition: String(record.fields[fields.DEFINITION] || ''),
+        status: String(record.fields[fields.STATUS] || 'active'),
+        createdBy: String(record.fields[fields.CREATED_BY] || 'AI'),
+        usageCount: Number(record.fields[fields.USAGE_COUNT] || 0),
+        largeTenantCount: Number(record.fields[fields.LARGE_TENANT_COUNT] || 0),
+        largeTenantRatio: Number(record.fields[fields.LARGE_TENANT_RATIO] || 0),
+      },
+    };
+  }
+}

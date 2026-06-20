@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm ls *)",
+      "Bash(node -e \"const m = require\\('mermaid'\\); console.log\\(Object.keys\\(m\\)\\); console.log\\('default:', typeof m.default\\);\")",
+      "Bash(node -e \"const m = require\\('mermaid'\\); console.log\\('default keys:', Object.keys\\(m.default || {}\\)\\);\")",
+      "Bash(node -e ' *)",
+      "Bash(PORT=3001 npm run dev)",
+      "Bash(curl -s http://localhost:3001)",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(curl -s 'http://localhost:3000/_next/static/chunks/app/page.js')",
+      "Read(//tmp/**)",
+      "Bash(grep -E '\\\\.\\(mjs|js\\)$')",
+      "Bash(pnpm tsc --noEmit)",
+      "Bash(pnpm lint)",
+      "Bash(pnpm test)",
+      "Bash(npx playwright test)",
+      "Bash(npx next dev*)",
+      "Bash(npm run dev*)",
+      "Bash(npx kill-port)",
+      "Bash(curl -s localhost:3000*)"
+    ]
+  },
+  "hooks": {
+    "preCommit": [
+      "pnpm tsc --noEmit && pnpm lint"
+    ]
+  }
+}
