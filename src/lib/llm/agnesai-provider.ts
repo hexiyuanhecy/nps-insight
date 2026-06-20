@@ -14,10 +14,10 @@ export class AgnesAIProvider implements LLMProvider {
   private model: string;
   private baseUrl: string;
 
-  constructor(apiKey?: string, model?: string) {
+  constructor(apiKey?: string, model?: string, baseUrl?: string) {
     this.apiKey = apiKey || process.env.AGNESAI_API_KEY || '';
     this.model = model || process.env.AGNESAI_MODEL || 'agnes-2.0-flash';
-    this.baseUrl = process.env.AGNESAI_BASE_URL || 'https://api-hub.agnes-ai.com/v1';
+    this.baseUrl = baseUrl || process.env.AGNESAI_BASE_URL || 'https://apihub.agnes-ai.com/v1';
   }
 
   getProviderType(): string {

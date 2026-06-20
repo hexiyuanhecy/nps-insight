@@ -1,0 +1,55 @@
+---
+name: frontend-conventions
+description: "强制执行通用前端项目的代码结构与风格约定"
+globs:
+  - "src/**/*.{ts,tsx,js,jsx,vue}"
+  - "!src/node_modules/**"
+priority: 1000
+alwaysApply: true
+
+---
+
+## 一、文件与结构约定
+
+### 1. 组件行数限制
+**`component-max-lines`**
+- description: "组件文件不得超过 300 行"
+- severity: error
+- maxLines: 300
+
+### 2. 常量定义位置
+**`constant-location`**
+- description: "常量必须在 `src/constants/` 目录下"
+- severity: error
+- allowedPaths:
+  - "src/constants/**/*"
+
+### 3. API 封装位置
+**`api-location`**
+- description: "API 调用必须在 `src/services/` 或 `src/apis/` 目录下"
+- severity: error
+- allowedPaths:
+  - "src/services/**/*"
+  - "src/apis/**/*"
+
+## 二、代码质量约定
+
+### 1. 禁用 `any` 类型
+**`no-any-type`**
+- description: "禁止使用 `any` 类型 (TypeScript)"
+- severity: error
+
+### 2. 函数组件偏好
+**`prefer-function-components`**
+- description: "优先使用函数组件和 Hooks"
+- severity: warning
+
+### 3. Props 类型定义
+**`props-typed`**
+- description: "组件 Props 必须显式类型定义"
+- severity: warning
+
+### 4. 文件命名规范
+**`file-naming-convention`**
+- description: "组件文件使用 PascalCase, 其他使用 kebab-case"
+- severity: warning

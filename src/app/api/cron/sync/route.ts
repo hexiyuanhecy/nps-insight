@@ -109,6 +109,16 @@ async function runSyncTask(): Promise<SyncResult> {
   let failedCount = 0;
 
   try {
+    // DEV_MODE: 开发阶段使用 Mock 数据
+    if (process.env.CRON_DEV_MODE === 'true') {
+      console.log('[Cron DEV] 开发模式：使用 Mock 数据');
+      const mockResult = await runSyncWithMockData();
+      details.push(`[Mock] 同步了 ${mockResult.syncedCount} 条反馈`);
+      syncedCount += mockResult.syncedCount;
+      failedCount += mockResult.failedCount;
+      return { ...mockResult, details };
+    }
+
     // 步骤1：拉取外部数据（多数据源适配器）
     const externalDataResult = await syncExternalData();
     if (externalDataResult > 0) {
@@ -484,4 +494,133 @@ async function updateLastSyncTime(): Promise<void> {
   } catch (error) {
     console.error('[Cron] 更新同步时间失败', error);
   }
+}
+
+// ============================================
+// DEV_MODE: Mock 同步任务
+// ============================================
+
+async function runSyncWithMockData(): Promise<SyncResult> {
+  const details: string[] = [];
+  let syncedCount = 0;
+  let failedCount = 0;
+
+  try {
+    // Mock: 生成 200 条模拟反馈
+    const mockFeedbacks = generateMockFeedbacks(200);
+    console.log(`[Cron DEV] 生成了 ${mockFeedbacks.length} 条 Mock 反馈`);
+
+    // Mock: 写入多维表格
+    for (const fb of mockFeedbacks) {
+      try {
+        await bitableClient.createRecord(TABLE_NAMES.FEEDBACK, {
+          [FEEDBACK_FIELDS.FEEDBACK_ID]: `MOCK-${fb.id}`,
+          [FEEDBACK_FIELDS.CONTENT]: fb.content,
+          [FEEDBACK_FIELDS.NPS_SCORE]: fb.score,
+          [FEEDBACK_FIELDS.CREATE_TIME]: fb.created_at,
+          [FEEDBACK_FIELDS.MODULE]: fb.module,
+          [FEEDBACK_FIELDS.SOURCE]: 'Mock',
+          [FEEDBACK_FIELDS.TENANT_ID]: fb.tenantId,
+          [FEEDBACK_FIELDS.TENANT_NAME]: fb.tenantName,
+          [FEEDBACK_FIELDS.TENANT_SCALE]: fb.tenantScale,
+          [FEEDBACK_FIELDS.USER_ID]: fb.userId,
+          [FEEDBACK_FIELDS.STATUS]: '未打标',
+        });
+        syncedCount++;
+      } catch {
+        failedCount++;
+      }
+    }
+
+    // Mock: AI 打标（使用规则打标）
+    const tagged = await mockAutoTag(syncedCount);
+    details.push(`[Mock] AI 打标 ${tagged} 条反馈`);
+
+    // Mock: 生成报告
+    details.push('[Mock] 报告生成成功');
+
+    // Mock: 发送通知
+    details.push('[Mock] 通知发送成功');
+
+    return {
+      success: true,
+      syncedCount,
+      failedCount,
+      details,
+      executedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '未知错误';
+    details.push(`[Mock] 同步失败: ${errorMessage}`);
+    return {
+      success: false,
+      syncedCount,
+      failedCount,
+      details,
+      executedAt: new Date().toISOString(),
+    };
+  }
+}
+
+function generateMockFeedbacks(count: number) {
+  const modules = ['极速打卡', '审批流程', '考勤统计', '薪资查询', '请假管理'];
+  const templates: Record<number, string[]> = {
+    5: ['功能非常好用，解决了实际问题', '界面设计很清晰，操作方便'],
+    4: ['整体不错，小细节可改进', '功能挺实用的，偶尔有小问题'],
+    3: ['能用的水平，没有太多惊喜', '中规中矩，和竞品比没有明显优势'],
+    2: ['最近经常崩溃，严重影响使用', '响应速度太慢了'],
+    1: ['太难用了，浪费时间', '全是bug，没法正常使用'],
+  };
+  const scores = [1, 2, 3, 4, 5];
+  const weights = [15, 20, 30, 20, 15];
+  const rand = (w: number[]) => {
+    const total = w.reduce((a, b) => a + b, 0);
+    let r = Math.random() * total;
+    for (let i = 0; i < w.length; i++) {
+      r -= w[i];
+      if (r <= 0) return scores[i];
+    }
+    return 3;
+  };
+
+  return Array.from({ length: count }, (_, i) => {
+    const score = rand(weights);
+    const module = modules[Math.floor(Math.random() * modules.length)];
+    const content = templates[score][Math.floor(Math.random() * templates[score].length)];
+    return {
+      id: i + 1,
+      content,
+      module,
+      score,
+      created_at: `2026-06-${String(Math.floor(Math.random() * 15) + 1).padStart(2, '0')} ${String(Math.floor(Math.random() * 12) + 8).padStart(2, '0')}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`,
+      tenantId: `T${String(Math.floor(Math.random() * 10) + 1).padStart(3, '0')}`,
+      tenantName: `租户${Math.floor(Math.random() * 10) + 1}`,
+      tenantScale: ['A1', 'A2', 'A3', 'A4', 'A5'][Math.floor(Math.random() * 5)],
+      userId: `U${String(i + 1).padStart(4, '0')}`,
+    };
+  });
+}
+
+async function mockAutoTag(count: number): Promise<number> {
+  // Mock 打标：直接在多维表格中标记
+  const filter = JSON.stringify({
+    conjunction: 'and',
+    conditions: [
+      { field_name: FEEDBACK_FIELDS.STATUS, operator: 'is', value: ['未打标'] },
+    ],
+  });
+  const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, { filter, pageSize: count });
+  let success = 0;
+  for (const record of records.slice(0, count)) {
+    try {
+      await bitableClient.updateRecord(TABLE_NAMES.FEEDBACK, record.record_id, {
+        tag1: '功能优化',
+        tag2: record.fields[FEEDBACK_FIELDS.MODULE] || '',
+        tag3: '一般问题',
+        [FEEDBACK_FIELDS.STATUS]: '已打标',
+      });
+      success++;
+    } catch { /* skip */ }
+  }
+  return success;
 }

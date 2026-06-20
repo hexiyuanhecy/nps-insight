@@ -156,6 +156,7 @@ export function createDefaultConfig(): TabConfig {
       analysisMonthDay: 1,
       syncCron: '0 10 * * 1',
       analysisCron: '0 10 1 * *',
+      devMode: false,
     },
     logPlatform: { urlTemplate: '' },
     notification: { chatIds: '', adminUserIds: '' },

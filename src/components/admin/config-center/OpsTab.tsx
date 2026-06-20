@@ -23,7 +23,18 @@ export function OpsTab({ ctrl }: OpsTabProps) {
     <div className="space-y-6">
       {/* 定时任务周期 - 自然语言形式 */}
       <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <SectionTitle icon={<Clock className="h-5 w-5" />} title="定时任务周期" desc="友好选择器会自动生成 Cron；所有时间按服务器时区" />
+        <div className="mb-4 flex items-start justify-between">
+          <SectionTitle icon={<Clock className="h-5 w-5" />} title="定时任务周期" desc="友好选择器会自动生成 Cron；所有时间按服务器时区" />
+          <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.schedule.devMode || false}
+              onChange={(e) => ctrl.updateSchedule('devMode', e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            开发模式（Mock 数据）
+          </label>
+        </div>
 
         {/* 数据拉取 */}
         <div className="rounded-lg border border-slate-200 p-4">

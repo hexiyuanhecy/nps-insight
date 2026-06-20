@@ -419,16 +419,15 @@ async function createPeriodAnalysisTable(token: string, appToken: string): Promi
  * 3. 直接输入 appToken
  */
 export function extractAppToken(input: string): string | null {
+  // 1. Full URL: https://xxx.feishu.cn/base/<appToken> or /bitable/<appToken>
+  const baseMatch = input.match(/\/base\/([a-zA-Z0-9]+)/);
+  if (baseMatch) return baseMatch[1];
   const bitableMatch = input.match(/\/bitable\/([a-zA-Z0-9]+)/);
-  if (bitableMatch) {
-    return bitableMatch[1];
-  }
-
+  if (bitableMatch) return bitableMatch[1];
   const wikiMatch = input.match(/\/wiki\/([a-zA-Z0-9]+)/);
-  if (wikiMatch) {
-    return wikiMatch[1];
-  }
+  if (wikiMatch) return wikiMatch[1];
 
+  // 2. Bare token (alphanumeric, > 10 chars)
   if (/^[a-zA-Z0-9]+$/.test(input) && input.length > 10) {
     return input;
   }

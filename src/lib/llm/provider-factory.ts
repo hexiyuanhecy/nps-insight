@@ -11,7 +11,7 @@ export class LLMProviderFactory {
   static create(config: LLMConfig): LLMProvider {
     switch (config.provider) {
       case 'agnesai':
-        return new AgnesAIProvider(config.apiKey, config.model);
+        return new AgnesAIProvider(config.apiKey, config.model, config.baseUrl);
       case 'openai':
       case 'custom':
         return new OpenAIProvider({
@@ -34,10 +34,10 @@ export class LLMProviderFactory {
    * 从环境变量创建 Provider
    */
   static createFromEnv(): LLMProvider {
-    const provider = process.env.LLM_PROVIDER as LLMConfig['provider'];
-    const apiKey = process.env.LLM_API_KEY;
-    const baseUrl = process.env.LLM_BASE_URL;
-    const model = process.env.LLM_MODEL;
+    const provider = process.env.AGNESAI_PROVIDER as LLMConfig['provider'];
+    const apiKey = process.env.AGNESAI_API_KEY;
+    const baseUrl = process.env.AGNESAI_BASE_URL;
+    const model = process.env.AGNESAI_MODEL;
 
     return this.create({
       provider: provider || 'agnesai',

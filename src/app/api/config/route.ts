@@ -10,6 +10,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 import { AdapterFactory } from '@/lib/data-sources/adapter-factory';
 import { LLMProviderFactory } from '@/lib/llm/provider-factory';
 import {
@@ -75,10 +77,10 @@ function buildV3Config(): any {
 
   // 5. AI 模型
   const ai = {
-    provider: (process.env.AI_PROVIDER as 'agnesai' | 'custom') || 'agnesai',
-    apiKey: process.env.AI_API_KEY || '',
-    baseUrl: process.env.AI_BASE_URL || '',
-    model: process.env.AI_MODEL || 'agnes-2.0-flash',
+    provider: (process.env.AGNESAI_PROVIDER as 'agnesai' | 'custom') || 'agnesai',
+    apiKey: process.env.AGNESAI_API_KEY || '',
+    baseUrl: process.env.AGNESAI_BASE_URL || '',
+    model: process.env.AGNESAI_MODEL || 'agnes-2.0-flash',
   };
 
   // 6. Tag1（默认或从环境变量 JSON 解析）
@@ -106,10 +108,46 @@ function buildV3Config(): any {
       .filter(Boolean),
   };
 
+  // Parse cron string into human-friendly schedule fields
+  function parseCronToSchedule(cron: string) {
+    const parts = cron.split(' ');
+    const min = parseInt(parts[0], 10);
+    const hr = parseInt(parts[1], 10);
+    const dom = parts[2];
+    const month = parts[3];
+    const dow = parts[4];
+    if (dow !== undefined && dow !== '*' && dom === '*') {
+      // Weekly: "0 10 * * 1" → week, every=1, time=10:00, weekDay=1
+      return { unit: 'week' as const, every: 1, time: `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}`, weekDay: parseInt(dow, 10) || 7, monthDay: 1 };
+    }
+    if (dom !== undefined && dom !== '*' && month === '*') {
+      // Monthly: "0 10 1 * *" → month, every=1, time=10:00, monthDay=1
+      return { unit: 'month' as const, every: 1, time: `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}`, weekDay: 1, monthDay: parseInt(dom, 10) || 1 };
+    }
+    if (dom === '*' && month === '*' && dow === '*') {
+      // Daily: "0 10 * * *" → day, every=1, time=10:00
+      return { unit: 'day' as const, every: 1, time: `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}`, weekDay: 1, monthDay: 1 };
+    }
+    return { unit: 'week' as const, every: 1, time: '10:00', weekDay: 1, monthDay: 1 };
+  }
+
   // 9. 任务周期
+  const syncParts = parseCronToSchedule(process.env.CRON_SYNC_SCHEDULE || '0 0 * * 1');
+  const analysisParts = parseCronToSchedule(process.env.CRON_ANALYSIS_SCHEDULE || '0 0 1 * *');
   const schedule = {
+    syncUnit: syncParts.unit,
+    syncEvery: syncParts.every,
+    syncTime: syncParts.time,
+    syncWeekDay: syncParts.weekDay,
+    syncMonthDay: syncParts.monthDay,
+    analysisUnit: analysisParts.unit,
+    analysisEvery: analysisParts.every,
+    analysisTime: analysisParts.time,
+    analysisWeekDay: analysisParts.weekDay,
+    analysisMonthDay: analysisParts.monthDay,
     syncCron: process.env.CRON_SYNC_SCHEDULE || '0 0 * * 1',
     analysisCron: process.env.CRON_ANALYSIS_SCHEDULE || '0 0 1 * *',
+    devMode: process.env.CRON_DEV_MODE === 'true',
   };
 
   // 10. 日志平台
@@ -196,6 +234,9 @@ export async function POST(request: NextRequest) {
 
       case 'linkBitable':
         return linkBitableAction(body);
+
+      case 'runManualSync':
+        return runManualSyncAction(body.config);
 
       case 'saveConfig':
         return saveConfigLegacy(body);
@@ -303,6 +344,8 @@ async function saveConfigV3(config: any) {
       if (config.schedule.syncCron) notifyConfigChange('cron', 'syncCron', config.schedule.syncCron);
       if (config.schedule.analysisCron)
         notifyConfigChange('cron', 'analysisCron', config.schedule.analysisCron);
+      if (config.schedule.devMode !== undefined)
+        notifyConfigChange('cron', 'devMode', String(config.schedule.devMode));
     }
     if (config.logPlatform?.urlTemplate) {
       notifyConfigChange('logPlatform', 'urlTemplate', config.logPlatform.urlTemplate);
@@ -340,10 +383,10 @@ async function saveConfigV3(config: any) {
   if (config.dataSource?.queryParams) envVars.DATA_SOURCE_QUERY_PARAMS = config.dataSource.queryParams;
   if (config.dataSource?.timeRule) envVars.DATA_SOURCE_TIME_RULE = config.dataSource.timeRule;
 
-  if (config.ai?.provider) envVars.AI_PROVIDER = config.ai.provider;
-  if (config.ai?.apiKey && config.ai.apiKey !== '__SET__') envVars.AI_API_KEY = config.ai.apiKey;
-  if (config.ai?.baseUrl) envVars.AI_BASE_URL = config.ai.baseUrl;
-  if (config.ai?.model) envVars.AI_MODEL = config.ai.model;
+  if (config.ai?.provider) envVars.AGNESAI_PROVIDER = config.ai.provider;
+  if (config.ai?.apiKey && config.ai.apiKey !== '__SET__') envVars.AGNESAI_API_KEY = config.ai.apiKey;
+  if (config.ai?.baseUrl) envVars.AGNESAI_BASE_URL = config.ai.baseUrl;
+  if (config.ai?.model) envVars.AGNESAI_MODEL = config.ai.model;
 
   if (config.tag1) envVars.CONFIG_TAG1 = JSON.stringify(config.tag1);
   if (typeof config.tag2Init !== 'undefined') envVars.CONFIG_TAG2_INIT = config.tag2Init || '';
@@ -358,8 +401,65 @@ async function saveConfigV3(config: any) {
   if (config.logPlatform?.urlTemplate) envVars.LOG_PLATFORM_URL_TEMPLATE = config.logPlatform.urlTemplate;
 
   if (config.notification?.chatIds) envVars.NOTIFICATION_CHAT_ID = config.notification.chatIds;
-  if (config.notification?.adminUserIds)
+  if (config.notification?.adminUserIds) {
+    if (!config.notification.adminUserIds.trim()) {
+      return NextResponse.json(
+        { success: false, error: '表格管理员（飞书用户 ID）为必填项' },
+        { status: 400 }
+      );
+    }
     envVars.NOTIFICATION_ADMIN_USER_IDS = config.notification.adminUserIds;
+  }
+
+  if (config.schedule?.devMode !== undefined)
+    envVars.CRON_DEV_MODE = String(config.schedule.devMode);
+
+  // Write envVars to .env file on disk
+  try {
+    const envPath = path.join(process.cwd(), '.env');
+    let existing = '';
+    try {
+      existing = fs.readFileSync(envPath, 'utf-8');
+    } catch { /* file doesn't exist yet */ }
+
+    const lines = existing.split('\n');
+    const envKeys = new Set(Object.keys(envVars));
+    const updatedLines: string[] = [];
+    const newEntries: string[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) {
+        updatedLines.push(line);
+        continue;
+      }
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx > 0) {
+        const key = trimmed.substring(0, eqIdx).trim();
+        if (envKeys.has(key)) {
+          updatedLines.push(`${key}=${envVars[key]}`);
+          envKeys.delete(key);
+          continue;
+        }
+      }
+      updatedLines.push(line);
+    }
+
+    // Append any new keys
+    for (const key of Array.from(envKeys)) {
+      newEntries.push(`${key}=${envVars[key]}`);
+    }
+
+    if (newEntries.length > 0) {
+      updatedLines.push('');
+      updatedLines.push(...newEntries);
+    }
+
+    fs.writeFileSync(envPath, updatedLines.join('\n'), 'utf-8');
+    console.log('[Config] .env file updated');
+  } catch (error) {
+    console.error('[Config] Failed to write .env:', error);
+  }
 
   return NextResponse.json({
     success: true,
@@ -424,9 +524,9 @@ async function testAI(aiConfig: any) {
   try {
     const mapped: any = {
       provider,
-      apiKey: aiConfig.apiKey && aiConfig.apiKey !== '__SET__' ? aiConfig.apiKey : process.env.AI_API_KEY || '',
-      baseUrl: aiConfig.baseUrl || process.env.AI_BASE_URL || '',
-      model: aiConfig.model || process.env.AI_MODEL || 'agnes-2.0-flash',
+      apiKey: aiConfig.apiKey && aiConfig.apiKey !== '__SET__' ? aiConfig.apiKey : process.env.AGNESAI_API_KEY || '',
+      baseUrl: aiConfig.baseUrl || process.env.AGNESAI_BASE_URL || '',
+      model: aiConfig.model || process.env.AGNESAI_MODEL || 'agnes-2.0-flash',
     };
     const llm = LLMProviderFactory.create(mapped);
     const result = await llm.testConnection();
@@ -696,4 +796,33 @@ async function saveConfigLegacy(data: any) {
 
 async function testLLMLegacy(data: any) {
   return testAI(data.config || data.llm || {});
+}
+
+// ============================================
+// 手动触发同步任务
+// ============================================
+
+async function runManualSyncAction(config: any) {
+  try {
+    // Proxy to the sync cron endpoint
+    const port = process.env.PORT || '3000';
+    const cronSecret = process.env.CRON_SECRET;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (cronSecret) headers['Authorization'] = `Bearer ${cronSecret}`;
+    const res = await fetch(`http://localhost:${port}/api/cron/sync`, {
+      method: 'POST',
+      headers,
+    });
+    const data = await res.json();
+    return NextResponse.json({
+      success: res.ok && data.success,
+      message: res.ok && data.success ? '同步任务已执行' : '同步任务执行失败: ' + data.error,
+      data,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : '未知错误' },
+      { status: 500 }
+    );
+  }
 }

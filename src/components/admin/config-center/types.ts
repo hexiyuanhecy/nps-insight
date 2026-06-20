@@ -61,6 +61,7 @@ export interface TabConfig {
     analysisMonthDay: number;
     syncCron?: string;
     analysisCron?: string;
+    devMode?: boolean;
   };
   logPlatform: {
     urlTemplate: string;

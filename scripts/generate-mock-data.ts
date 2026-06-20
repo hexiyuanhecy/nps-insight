@@ -1,12 +1,12 @@
 /**
- * 生成150条Mock反馈数据
+ * 生成200条Mock反馈数据
  * 分布策略：
- * - 打卡模块：60条（40%）- TOP问题集中
- * - 休假模块：25条（16.7%）
- * - 审批模块：20条（13.3%）
- * - 加班模块：15条（10%）
- * - 统计报表：10条（6.7%）
- * - 其他模块：20条（13.3%）
+ * - 打卡模块：80条（40%）- TOP问题集中
+ * - 休假模块：33条（16.5%）
+ * - 审批模块：27条（13.5%）
+ * - 加班模块：20条（10%）
+ * - 统计报表：13条（6.5%）
+ * - 其他模块：27条（13.5%）
  */
 
 import { writeFileSync } from 'fs';
@@ -262,8 +262,8 @@ function generateCreateTime(): string {
 function generateMockData(): MockFeedback[] {
   const feedbacks: MockFeedback[] = [];
 
-  // 打卡模块：60条
-  for (let i = 0; i < 60; i++) {
+  // 打卡模块：80条
+  for (let i = 0; i < 80; i++) {
     const tenant = TENANTS[Math.floor(Math.random() * TENANTS.length)];
     feedbacks.push({
       feedbackId: `fb_${String(i + 1).padStart(3, '0')}`,
@@ -278,8 +278,8 @@ function generateMockData(): MockFeedback[] {
     });
   }
 
-  // 休假模块：25条
-  for (let i = 60; i < 85; i++) {
+  // 休假模块：33条
+  for (let i = 80; i < 113; i++) {
     const tenant = TENANTS[Math.floor(Math.random() * TENANTS.length)];
     feedbacks.push({
       feedbackId: `fb_${String(i + 1).padStart(3, '0')}`,
@@ -294,8 +294,8 @@ function generateMockData(): MockFeedback[] {
     });
   }
 
-  // 审批模块：20条
-  for (let i = 85; i < 105; i++) {
+  // 审批模块：27条
+  for (let i = 113; i < 140; i++) {
     const tenant = TENANTS[Math.floor(Math.random() * TENANTS.length)];
     feedbacks.push({
       feedbackId: `fb_${String(i + 1).padStart(3, '0')}`,
@@ -310,8 +310,8 @@ function generateMockData(): MockFeedback[] {
     });
   }
 
-  // 加班模块：15条
-  for (let i = 105; i < 120; i++) {
+  // 加班模块：20条
+  for (let i = 140; i < 160; i++) {
     const tenant = TENANTS[Math.floor(Math.random() * TENANTS.length)];
     feedbacks.push({
       feedbackId: `fb_${String(i + 1).padStart(3, '0')}`,
@@ -326,8 +326,8 @@ function generateMockData(): MockFeedback[] {
     });
   }
 
-  // 统计报表模块：10条
-  for (let i = 120; i < 130; i++) {
+  // 统计报表模块：13条
+  for (let i = 160; i < 173; i++) {
     const tenant = TENANTS[Math.floor(Math.random() * TENANTS.length)];
     feedbacks.push({
       feedbackId: `fb_${String(i + 1).padStart(3, '0')}`,
@@ -342,8 +342,8 @@ function generateMockData(): MockFeedback[] {
     });
   }
 
-  // 其他模块：20条
-  for (let i = 130; i < 150; i++) {
+  // 其他模块：27条
+  for (let i = 173; i < 200; i++) {
     const tenant = TENANTS[Math.floor(Math.random() * TENANTS.length)];
     feedbacks.push({
       feedbackId: `fb_${String(i + 1).padStart(3, '0')}`,
@@ -363,8 +363,8 @@ function generateMockData(): MockFeedback[] {
 
 // 生成数据
 const mockData = generateMockData();
-writeFileSync('mock-feedbacks-150.json', JSON.stringify(mockData, null, 2));
-console.log('✅ 已生成150条Mock数据');
+writeFileSync('mock-feedbacks-200.json', JSON.stringify(mockData, null, 2));
+console.log('✅ 已生成200条Mock数据');
 
 // 统计TOP问题
 const topIssues = mockData.reduce((acc, f) => {
@@ -387,4 +387,4 @@ const largeTenantFeedbacks = mockData.filter(f =>
   ['A4', 'A5'].includes(TENANTS.find(t => t.id === f.tenantId)?.scale || '')
 );
 
-console.log(`\n🏢 大租户反馈：${largeTenantFeedbacks.length}条 (${((largeTenantFeedbacks.length / 150) * 100).toFixed(1)}%)`);
+console.log(`\n🏢 大租户反馈：${largeTenantFeedbacks.length}条 (${((largeTenantFeedbacks.length / 200) * 100).toFixed(1)}%)`);
