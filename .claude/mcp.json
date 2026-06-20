@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "nps-feishu-bitable": {
+      "command": "npx",
+      "args": ["-y", "@larksuiteoapi/mcp-bitable"],
+      "env": {
+        "FEISHU_APP_ID": "${FEISHU_APP_ID}",
+        "FEISHU_APP_SECRET": "${FEISHU_APP_SECRET}"
+      },
+      "description": "飞书多维表格 MCP Server - 用于读写 NPS Insight 多维表格数据"
+    },
+    "nps-feishu-doc": {
+      "command": "npx",
+      "args": ["-y", "@larksuiteoapi/mcp-doc"],
+      "env": {
+        "FEISHU_APP_ID": "${FEISHU_APP_ID}",
+        "FEISHU_APP_SECRET": "${FEISHU_APP_SECRET}"
+      },
+      "description": "飞书文档 MCP Server - 用于读写周报/月报文档"
+    },
+    "nps-feishu-msg": {
+      "command": "npx",
+      "args": ["-y", "@larksuiteoapi/mcp-im"],
+      "env": {
+        "FEISHU_APP_ID": "${FEISHU_APP_ID}",
+        "FEISHU_APP_SECRET": "${FEISHU_APP_SECRET}"
+      },
+      "description": "飞书消息 MCP Server - 用于发送 Bot 通知消息"
+    }
+  }
+}
