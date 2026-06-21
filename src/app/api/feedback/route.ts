@@ -16,7 +16,6 @@ import {
   PaginatedResponse,
 } from '@/lib/types';
 import { analyzeFeedback } from '@/lib/ai/tagger';
-import { findOrCreateTag } from '@/lib/ai/tagger';
 
 // ============================================
 // GET - 获取反馈列表
@@ -140,8 +139,7 @@ export async function POST(request: NextRequest) {
           module: module || '',
         });
 
-        // 查找或创建标签
-        await findOrCreateTag(analysisResult.tag1, analysisResult.tag2, analysisResult.tag3);
+        // 查找或创建标签（ensureTagExists 已在 completeTaggingProcess 中调用）
 
         // 更新字段（只写表中存在的字段，字段名严格对应：Tag1/Tag2/Tag3 大写 T）
         fields[FEEDBACK_FIELDS.TAG1] = analysisResult.tag1 || '';

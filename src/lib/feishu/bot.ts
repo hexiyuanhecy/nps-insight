@@ -908,20 +908,87 @@ export function createHelpCard(): InteractiveMessageContent {
   };
 }
 
-// ============================================
-// 工具函数
-// ============================================
+/**
+ * 创建周报通知卡片（PRD v6.0 第7.1节）
+ */
+export function createWeeklyReportCard(data: {
+  weekNumber: string;
+  totalFeedbacks: number;
+  reviewCount: number;
+  topIssues: Array<{ tag1: string; tag2: string; tag3: string; count: number; pct: number }>;
+  scoreDistribution: Array<{ score: string; pct: number }>;
+  bitableUrl?: string;
+  logPlatformUrl?: string;
+  hasNeedLogCheck: boolean;
+  hasReviewNeeded: boolean;
+}): InteractiveMessageContent {
+  const { weekNumber, totalFeedbacks, reviewCount, topIssues, scoreDistribution, bitableUrl, logPlatformUrl, hasNeedLogCheck, hasReviewNeeded } = data;
+  const reviewWarning = reviewCount > 100;
+
+  const elements: Record<string, unknown>[] = [
+    { tag: 'div', text: { tag: 'lark_md', content: `**📊 【Feelgood 打标周报】${weekNumber}**\n\n本周拉取：${totalFeedbacks}条负反馈\nAI已完成打标，待审核：${reviewCount}条` } },
+    { tag: 'hr' },
+    { tag: 'div', text: { tag: 'lark_md', content: `**📋 Top 5 问题**\n${topIssues.slice(0, 5).map((t, i) => `${i + 1}. ${t.tag3} (${t.tag2}) - ${t.count}次 (${t.pct}%)`).join('\n')}` } },
+    { tag: 'hr' },
+    { tag: 'div', text: { tag: 'lark_md', content: `**📈 评分分布**\n${scoreDistribution.map(s => `${s.score}分占${s.pct}%`).join(' | ')}` } },
+  ];
+
+  // 按钮
+  const actions: Record<string, unknown>[] = [];
+  if (hasReviewNeeded) actions.push({ tag: 'button', text: { tag: 'plain_text', content: '审核标签' }, type: 'primary', url: `${bitableUrl || ''}?filter=%7B%22conditions%22%3A%5B%7B%22field_name%22%3A%22%E9%9C%80%E8%A6%81%E4%BA%BA%E5%B7%A5%E5%AE%A1%E6%A0%B8%22%2C%22operator%22%3A%22is%22%2C%22value%22%3A%5Btrue%5D%7D%5D%7D` });
+  actions.push({ tag: 'button', text: { tag: 'plain_text', content: '完整看板' }, type: 'default', url: bitableUrl });
+  if (hasNeedLogCheck && logPlatformUrl) actions.push({ tag: 'button', text: { tag: 'plain_text', content: '查看日志平台' }, type: 'default', url: logPlatformUrl });
+
+  elements.push({ tag: 'action', actions });
+
+  // 警告
+  if (reviewWarning) {
+    elements.push({
+      tag: 'div',
+      text: { tag: 'lark_md', content: '⚠️ 本周待审核量超过100条，请及时处理！' },
+    });
+  }
+
+  return {
+    config: { wide_screen_mode: true, enable_forward: true },
+    header: { title: { tag: 'lark_md', content: `📊 【Feelgood 打标周报】${weekNumber}` }, template: reviewWarning ? 'red' : 'blue' },
+    elements,
+  };
+}
 
 /**
- * 生成UUID
- * @returns UUID字符串
+ * 创建月报通知卡片（PRD v6.0 第7.2节）
  */
-function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+export function createMonthlyReportCard(data: {
+  periodName: string;
+  topIssueUrl?: string;
+  documentUrl?: string;
+  dashboardUrl?: string;
+  mergeCount: number;
+  splitCount: number;
+}): InteractiveMessageContent {
+  const { periodName, topIssueUrl, documentUrl, dashboardUrl, mergeCount, splitCount } = data;
+
+  const elements: Record<string, unknown>[] = [
+    { tag: 'div', text: { tag: 'lark_md', content: `**📈 【Feelgood月度分析】${periodName}**` } },
+    { tag: 'hr' },
+    { tag: 'div', text: { tag: 'lark_md', content: `**📋 Top问题已更新至分析表**` } },
+    { tag: 'div', text: { tag: 'lark_md', content: `**📄 会议准备文档已生成**` } },
+    { tag: 'div', text: { tag: 'lark_md', content: `**🔗 可视化仪表盘**` } },
+    { tag: 'div', text: { tag: 'lark_md', content: `**🔄 本期标签自进化：合并标签${mergeCount}组，拆分建议${splitCount}项**` } },
+  ];
+
+  const actions: Record<string, unknown>[] = [];
+  if (topIssueUrl) actions.push({ tag: 'button', text: { tag: 'plain_text', content: 'Top问题表' }, type: 'primary', url: topIssueUrl });
+  if (documentUrl) actions.push({ tag: 'button', text: { tag: 'plain_text', content: '查看文档' }, type: 'default', url: documentUrl });
+  if (dashboardUrl) actions.push({ tag: 'button', text: { tag: 'plain_text', content: '仪表盘' }, type: 'default', url: dashboardUrl });
+  if (actions.length > 0) elements.push({ tag: 'action', actions });
+
+  return {
+    config: { wide_screen_mode: true, enable_forward: true },
+    header: { title: { tag: 'lark_md', content: `📈 【Feelgood月度分析】${periodName}` }, template: 'blue' },
+    elements,
+  };
 }
 
 // ============================================
@@ -935,5 +1002,7 @@ export const feishuBot = {
   sendCardMessage,
   createFeedbackCard,
   createAnalysisCard,
+  createWeeklyReportCard,
+  createMonthlyReportCard,
   createHelpCard,
 };

@@ -39,13 +39,13 @@ const TENANTS = [
   { id: 'T013', name: '比亚迪', scale: 'A1' },
   { id: 'T014', name: '蔚来', scale: 'A1' },
   { id: 'T015', name: '理想', scale: 'A1' },
+  { id: 'T016', name: '滴滴', scale: 'A6' },
 ];
 
 const PLATFORMS = ['iOS', 'Android', 'Web', '小程序'];
 
 const DISSATISFACTION_REASONS = [
-  '系统卡顿', '功能缺失', '界面不友好', '操作复杂', '定位不准',
-  '数据错误', '提醒不及时', '流程繁琐', '权限问题', '网络问题',
+  '系统卡顿', '界面不美观', '功能缺失', '打开速度慢', '其他', '缺少功能',
 ];
 
 // TOP问题集中
@@ -252,6 +252,15 @@ function generateScore(content: string): number {
   return Math.floor(Math.random() * 5) + 1;
 }
 
+// Override score distribution globally
+function forceScoreDistribution(score: number): number {
+  // 1分约20%，2-3分约50%，4-5分约30%
+  const r = Math.random();
+  if (r < 0.20) return 1;
+  if (r < 0.70) return Math.random() < 0.5 ? 2 : 3; // 2-3分共50%
+  return Math.random() < 0.5 ? 4 : 5; // 4-5分共30%
+}
+
 function generateCreateTime(): string {
   const now = new Date();
   const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
@@ -384,7 +393,7 @@ sortedTopIssues.forEach(([issue, count], i) => {
 
 // 统计大租户反馈
 const largeTenantFeedbacks = mockData.filter(f =>
-  ['A4', 'A5'].includes(TENANTS.find(t => t.id === f.tenantId)?.scale || '')
+  ['A4', 'A5', 'A6'].includes(TENANTS.find(t => t.id === f.tenantId)?.scale || '')
 );
 
 console.log(`\n🏢 大租户反馈：${largeTenantFeedbacks.length}条 (${((largeTenantFeedbacks.length / 200) * 100).toFixed(1)}%)`);

@@ -9,7 +9,7 @@ import { AdapterFactory } from '@/lib/data-sources/adapter-factory';
 import { LLMProviderFactory } from '@/lib/llm/provider-factory';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
-import { feishuBot, createAnalysisCard } from '@/lib/feishu/bot';
+import { feishuBot, createWeeklyReportCard } from '@/lib/feishu/bot';
 import { SyncResult } from '@/lib/types';
 
 // ============================================
@@ -140,7 +140,7 @@ async function runSyncTask(): Promise<SyncResult> {
     }
 
     // 步骤4：发送通知
-    const notificationResult = await sendNotification();
+    const notificationResult = await sendNotification(syncedCount);
     if (notificationResult) {
       details.push('发送通知成功');
     }
@@ -211,14 +211,32 @@ async function syncExternalData(): Promise<number> {
       return 0;
     }
 
-    // 写入多维表格
-    const records = feedbacks.map((f) => ({
+    // 步骤2：去重 — 获取本周已有 feedbackId
+    const syncNow = new Date();
+    const thisWeekStart = new Date(syncNow);
+    thisWeekStart.setDate(syncNow.getDate() - syncNow.getDay() + 1);
+    thisWeekStart.setHours(0, 0, 0, 0);
+    const thisWeekEnd = new Date(thisWeekStart);
+    thisWeekEnd.setDate(thisWeekStart.getDate() + 7);
+    thisWeekEnd.setHours(23, 59, 59, 999);
+
+    const existingFeedbackIds = await getExistingFeedbackIds(thisWeekStart, thisWeekEnd);
+    const filteredFeedbacks = feedbacks.filter(f => !existingFeedbackIds.has(f.feedbackId));
+
+    if (filteredFeedbacks.length === 0) {
+      console.log('[Cron] 本周无新增反馈（全部去重）');
+      return 0;
+    }
+    console.log(`[Cron] 去重后新增 ${filteredFeedbacks.length} 条反馈（跳过 ${existingFeedbackIds.size} 条重复）`);
+
+    // 步骤3：批量写入
+    const records = filteredFeedbacks.map((f) => ({
       fields: {
         [FEEDBACK_FIELDS.FEEDBACK_ID]: f.feedbackId,
         [FEEDBACK_FIELDS.CONTENT]: f.content,
         [FEEDBACK_FIELDS.NPS_SCORE]: f.score,
         [FEEDBACK_FIELDS.CREATE_TIME]: f.createTime,
-        [FEEDBACK_FIELDS.MODULE]: f.module || '',
+        [FEEDBACK_FIELDS.UNSATISFACTION_REASON]: f.module || '',
         [FEEDBACK_FIELDS.SOURCE]: f.source || '',
         [FEEDBACK_FIELDS.TENANT_ID]: f.tenantId || '',
         [FEEDBACK_FIELDS.TENANT_NAME]: f.tenantName || '',
@@ -230,8 +248,8 @@ async function syncExternalData(): Promise<number> {
 
     await bitableClient.batchCreateRecords(TABLE_NAMES.FEEDBACK, records);
 
-    console.log(`[Cron] 外部数据同步完成，共 ${feedbacks.length} 条`);
-    return feedbacks.length;
+    console.log(`[Cron] 外部数据同步完成，共写入 ${filteredFeedbacks.length} 条`);
+    return filteredFeedbacks.length;
   } catch (error) {
     console.error('[Cron] 外部数据同步失败', error);
     return 0;
@@ -268,7 +286,7 @@ async function autoTagFeedbacks(): Promise<number> {
 
     console.log(`[Cron] 发现 ${records.length} 条未打标反馈，开始AI打标`);
 
-    // 获取 LLM Provider（从环境变量）
+    // 获取 LLM Provider
     const llm = LLMProviderFactory.createFromEnv();
     console.log(`[Cron] 使用 LLM: ${llm.getProviderType()}`);
 
@@ -278,8 +296,9 @@ async function autoTagFeedbacks(): Promise<number> {
     for (const record of records) {
       try {
         const content = String(record.fields[FEEDBACK_FIELDS.CONTENT] || '');
-        const moduleName = String(record.fields[FEEDBACK_FIELDS.MODULE] || '');
         const score = Number(record.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0);
+        const source = String(record.fields[FEEDBACK_FIELDS.SOURCE] || '');
+        const unsatReason = String(record.fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] || '');
 
         if (!content) continue;
 
@@ -287,7 +306,7 @@ async function autoTagFeedbacks(): Promise<number> {
         const systemPrompt = `你是一个专业的用户反馈分析助手。你的任务是根据用户反馈内容，提取三个层级的标签。
 
 ## Tag1（一级标签）—— 必须从以下 7 类中选择：
-1. 疑似Bug：功能异常、报错、无法使用
+1. 疑似Bug：功能异常、报错、崩溃、无法使用
 2. 功能优化：功能改进、新功能建议
 3. 界面改进：UI问题、交互优化
 4. 性能提升：加载慢、卡顿、耗电
@@ -312,9 +331,8 @@ async function autoTagFeedbacks(): Promise<number> {
 
         const userPrompt = `请分析以下用户反馈，提取标签。
 
-功能模块：${moduleName}
 评分：${score} 分（1-5分制）
-反馈内容：${content}
+反馈内容：${content}${unsatReason ? `\n不满意原因：${unsatReason}` : ''}${source ? `\n来源：${source}` : ''}
 
 请只输出 JSON 格式结果。`;
 
@@ -387,16 +405,13 @@ async function generateDailyReport(): Promise<boolean> {
     console.log(`[Cron] 昨日反馈统计: 总计${total}, 均分=${avgScore.toFixed(2)}`);
 
     // 保存到分析表
-    const { TABLE_NAMES: ANALYSIS_TABLE, ANALYSIS_FIELDS: AF } = await import('@/lib/feishu/constants');
-    await bitableClient.createRecord(ANALYSIS_TABLE.ANALYSIS, {
-      [AF.PERIOD_ID]: `daily_${dateStr}`,
-      [AF.PERIOD_NAME]: `${dateStr} 日报`,
-      [AF.START_DATE]: yesterday.toISOString(),
-      [AF.END_DATE]: today.toISOString(),
-      [AF.TOTAL_FEEDBACKS]: total,
-      [AF.NPS_SCORE]: Math.round(avgScore * 100) / 100,
-      [AF.TOP_ISSUES]: JSON.stringify(['查看多维表格获取详细分析']),
-      [AF.CREATED_AT]: new Date().toISOString(),
+    const { TABLE_NAMES: TOP_ISSUES_TABLE, TOP_ISSUES_FIELDS: AF } = await import('@/lib/feishu/constants');
+    await bitableClient.createRecord(TOP_ISSUES_TABLE.TOP_ISSUES, {
+      [AF.TAG2_NAME]: '周期分析',
+      [AF.TAG3_NAMES]: '自动生成',
+      [AF.TOTAL_COUNT]: total,
+      [AF.PERIOD_NEW_COUNT]: Math.round(avgScore * 100) / 100,
+      [AF.ISSUE_KEY]: JSON.stringify(['查看多维表格获取详细分析']),
     });
 
     return true;
@@ -410,7 +425,7 @@ async function generateDailyReport(): Promise<boolean> {
  * 发送通知到群
  * @returns 是否成功
  */
-async function sendNotification(): Promise<boolean> {
+async function sendNotification(syncedCount: number): Promise<boolean> {
   const chatId = process.env.NOTIFICATION_CHAT_ID;
   if (!chatId) {
     console.log('[Cron] 未配置通知群ID，跳过通知');
@@ -418,51 +433,127 @@ async function sendNotification(): Promise<boolean> {
   }
 
   try {
-    // 获取最近数据
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
     const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
       pageSize: 500,
     });
 
-    const recentFeedbacks = records.filter((r) => {
-      const createTime = new Date(String(r.fields[FEEDBACK_FIELDS.CREATE_TIME] || ''));
-      return createTime >= thirtyDaysAgo;
-    });
+    // 统计待审核数和需要查日志数
+    let reviewCount = 0;
+    let needLogCheckCount = 0;
+    const tag3Counts = new Map<string, number>();
+    const scoreCounts = new Map<number, number>();
 
-    const total = recentFeedbacks.length;
-    const avgScore =
-      total > 0
-        ? recentFeedbacks.reduce((sum, f) => sum + Number(f.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0), 0) / total
-        : 0;
+    for (const r of records) {
+      const fields = r.fields || {};
+      const reviewNeeded = String(fields[FEEDBACK_FIELDS.REVIEW_NEEDED] || '').toLowerCase() === 'true' || fields[FEEDBACK_FIELDS.REVIEW_NEEDED] === true;
+      const needLog = String(fields[FEEDBACK_FIELDS.NEED_LOG_CHECK] || '').toLowerCase() === 'true' || fields[FEEDBACK_FIELDS.NEED_LOG_CHECK] === true;
+      if (reviewNeeded) reviewCount++;
+      if (needLog) needLogCheckCount++;
 
-    // 发送卡片消息
+      // 统计Tag3频次
+      const tag3Val = String(fields[FEEDBACK_FIELDS.TAG3] || '');
+      if (tag3Val) {
+        tag3Counts.set(tag3Val, (tag3Counts.get(tag3Val) || 0) + 1);
+      }
+
+      // 统计评分
+      const score = Number(fields[FEEDBACK_FIELDS.NPS_SCORE] || 0);
+      if (score) scoreCounts.set(score, (scoreCounts.get(score) || 0) + 1);
+    }
+
+    // 构建Top 5问题
+    const sortedTag3 = Array.from(tag3Counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+
+    const topIssues = sortedTag3.map(([tag3, count]) => ({
+      tag1: '',
+      tag2: '',
+      tag3,
+      count,
+      pct: syncedCount > 0 ? Math.round((count / syncedCount) * 100) : 0,
+    }));
+
+    // 评分分布：1分/2-3分/4-5分
+    const s1 = scoreCounts.get(1) || 0;
+    const s23 = (scoreCounts.get(2) || 0) + (scoreCounts.get(3) || 0);
+    const s45 = (scoreCounts.get(4) || 0) + (scoreCounts.get(5) || 0);
+    const total = syncedCount > 0 ? syncedCount : 1;
+    const scoreDistribution = [
+      { score: '1', pct: Math.round((s1 / total) * 100) },
+      { score: '2-3', pct: Math.round((s23 / total) * 100) },
+      { score: '4-5', pct: Math.round((s45 / total) * 100) },
+    ];
+
+    const now = new Date();
+    const weekNum = `第${getISOWeek(now)}周`;
+
     await feishuBot.sendCardMessage(
       chatId,
-      createAnalysisCard({
-        periodName: '最近30天（自动报告）',
-        totalFeedbacks: total,
-        npsScore: Math.round(avgScore * 100) / 100,
-        avgScore: Math.round(avgScore * 10) / 10,
-        topIssues: ['使用 /nps analysis 查看详细分析'],
-        promoterCount: recentFeedbacks.filter((f) => Number(f.fields[FEEDBACK_FIELDS.NPS_SCORE]) >= 4).length,
-        passiveCount: recentFeedbacks.filter((f) => {
-          const score = Number(f.fields[FEEDBACK_FIELDS.NPS_SCORE]);
-          return score >= 3 && score <= 3;
-        }).length,
-        detractorCount: recentFeedbacks.filter((f) => Number(f.fields[FEEDBACK_FIELDS.NPS_SCORE]) <= 2).length,
-        scoreDistribution: [],
-        tagStats: [],
-        bitableUrl: process.env.BITABLE_URL || '',
+      createWeeklyReportCard({
+        weekNumber: `${now.getFullYear()}年${weekNum}`,
+        totalFeedbacks: syncedCount,
+        reviewCount,
+        topIssues,
+        scoreDistribution,
+        bitableUrl: process.env.FEISHU_BITABLE_URL || '',
+        logPlatformUrl: process.env.LOG_PLATFORM_URL || '',
+        hasNeedLogCheck: needLogCheckCount > 0,
+        hasReviewNeeded: reviewCount > 0,
       })
     );
 
-    console.log('[Cron] 通知发送成功');
+    console.log(`[Cron] 通知发送成功（待审核：${reviewCount}，需查日志：${needLogCheckCount}）`);
     return true;
   } catch (error) {
     console.error('[Cron] 发送通知失败', error);
     return false;
+  }
+}
+
+function getISOWeek(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
+
+/**
+ * 获取指定时间范围内的已有 feedbackId 集合（用于去重）
+ */
+async function getExistingFeedbackIds(startDate: Date, endDate: Date): Promise<Set<string>> {
+  try {
+    const filter = JSON.stringify({
+      conjunction: 'and',
+      conditions: [
+        {
+          field_name: FEEDBACK_FIELDS.CREATE_TIME,
+          operator: '>=',
+          value: [startDate.toISOString()],
+        },
+        {
+          field_name: FEEDBACK_FIELDS.CREATE_TIME,
+          operator: '<=',
+          value: [endDate.toISOString()],
+        },
+      ],
+    });
+
+    const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
+      filter,
+      pageSize: 5000,
+    });
+
+    const existingIds = new Set<string>();
+    for (const r of records) {
+      const fid = String(r.fields[FEEDBACK_FIELDS.FEEDBACK_ID] || '');
+      if (fid) existingIds.add(fid);
+    }
+    return existingIds;
+  } catch (error) {
+    console.error('[Cron] 获取已有反馈ID失败', error);
+    return new Set<string>();
   }
 }
 
@@ -518,7 +609,7 @@ async function runSyncWithMockData(): Promise<SyncResult> {
           [FEEDBACK_FIELDS.CONTENT]: fb.content,
           [FEEDBACK_FIELDS.NPS_SCORE]: fb.score,
           [FEEDBACK_FIELDS.CREATE_TIME]: fb.created_at,
-          [FEEDBACK_FIELDS.MODULE]: fb.module,
+          [FEEDBACK_FIELDS.UNSATISFACTION_REASON]: fb.module,
           [FEEDBACK_FIELDS.SOURCE]: 'Mock',
           [FEEDBACK_FIELDS.TENANT_ID]: fb.tenantId,
           [FEEDBACK_FIELDS.TENANT_NAME]: fb.tenantName,
@@ -595,7 +686,7 @@ function generateMockFeedbacks(count: number) {
       created_at: `2026-06-${String(Math.floor(Math.random() * 15) + 1).padStart(2, '0')} ${String(Math.floor(Math.random() * 12) + 8).padStart(2, '0')}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`,
       tenantId: `T${String(Math.floor(Math.random() * 10) + 1).padStart(3, '0')}`,
       tenantName: `租户${Math.floor(Math.random() * 10) + 1}`,
-      tenantScale: ['A1', 'A2', 'A3', 'A4', 'A5'][Math.floor(Math.random() * 5)],
+      tenantScale: ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'][Math.floor(Math.random() * 6)],
       userId: `U${String(i + 1).padStart(4, '0')}`,
     };
   });
@@ -615,7 +706,7 @@ async function mockAutoTag(count: number): Promise<number> {
     try {
       await bitableClient.updateRecord(TABLE_NAMES.FEEDBACK, record.record_id, {
         tag1: '功能优化',
-        tag2: record.fields[FEEDBACK_FIELDS.MODULE] || '',
+        tag2: record.fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] || '',
         tag3: '一般问题',
         [FEEDBACK_FIELDS.STATUS]: '已打标',
       });

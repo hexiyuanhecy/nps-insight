@@ -54,6 +54,7 @@ export const MODULE_OPTIONS = [
   { name: '功能缺失', color: 2 },
   { name: '打开速度慢', color: 3 },
   { name: '其他', color: 4 },
+  { name: '缺少功能', color: 5 },
 ];
 
 export const TENANT_SCALE_OPTIONS = [

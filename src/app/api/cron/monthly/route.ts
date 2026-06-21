@@ -10,6 +10,7 @@ import { FormulaSync } from '@/lib/analysis/formula-sync';
 import { getDefaultStorage, getDefaultNotification, getDefaultDocument } from '@/lib/adapter-factory';
 import { EvolutionReport } from '@/lib/ai/tag-evolution';
 import { TopIssue } from '@/lib/analysis/top-issues';
+import { createMonthlyReportCard } from '@/lib/feishu/bot';
 
 /**
  * 月度任务执行结果
@@ -101,9 +102,18 @@ async function handleMonthlyTask(): Promise<NextResponse<MonthlyTaskResult>> {
     
     // 5. 发送通知
     console.log('[月度任务] 步骤5：发送通知');
+    const now = new Date();
+    const periodName = `${now.getFullYear()}年${now.getMonth() + 1}月`;
     const notificationChannels = process.env.NOTIFICATION_CHANNELS?.split(',') || [];
     if (notificationChannels.length > 0) {
-      const card = buildMonthlyReportCard(result);
+      const card = createMonthlyReportCard({
+        periodName,
+        topIssueUrl: process.env.FEISHU_BITABLE_URL || '',
+        documentUrl: result.meetingDoc?.url,
+        dashboardUrl: process.env.FEISHU_DASHBOARD_URL || '',
+        mergeCount: result.evolution?.duplicates.length || 0,
+        splitCount: result.evolution?.splittables.length || 0,
+      });
       await notification.sendToMultiple(notificationChannels, card);
       result.notification = true;
     }
@@ -176,7 +186,7 @@ async function generateMeetingDoc(
     
     for (let i = 0; i < Math.min(20, topIssues.length); i++) {
       const issue = topIssues[i];
-      content += `| ${i + 1} | ${issue.tag1} | ${issue.tag2} | ${issue.tag3} | ${issue.totalCount} | ${(issue.largeTenantRatio * 100).toFixed(1)}% | ${issue.avgScore.toFixed(1)} | ${issue.compositeScore.toFixed(2)} |\n`;
+      content += `| ${i + 1} | ${issue.tag2Name} | ${issue.tag3Names.join(', ')} | ${issue.totalCount} | ${(issue.largeTenantRatio * 100).toFixed(1)}% | ${issue.avgScore.toFixed(1)} | ${issue.largeTenantCount} |\n`;
     }
     content += `\n`;
   }
@@ -198,56 +208,4 @@ async function generateMeetingDoc(
   
   // 创建文档
   return document.create(title, content);
-}
-
-/**
- * 构建月度报告卡片
- */
-function buildMonthlyReportCard(result: MonthlyTaskResult): any {
-  const now = new Date();
-  const month = now.getMonth() + 1;
-  const year = now.getFullYear();
-  
-  return {
-    config: {
-      wide_screen_mode: true,
-    },
-    elements: [
-      {
-        tag: 'div',
-        text: {
-          tag: 'lark_md',
-          content: `# NPS 月度分析报告\n\n**${year}年${month}月**`,
-        },
-      },
-      {
-        tag: 'div',
-        text: {
-          tag: 'lark_md',
-          content: `## 标签自进化\n\n- 重复标签：${result.evolution?.duplicates.length || 0} 组\n- 可拆分标签：${result.evolution?.splittables.length || 0} 个\n- 冷门标签：${result.evolution?.coldTags.length || 0} 个`,
-        },
-      },
-      {
-        tag: 'div',
-        text: {
-          tag: 'lark_md',
-          content: `## Top 问题\n\n共 ${result.topIssues?.length || 0} 个问题`,
-        },
-      },
-      {
-        tag: 'action',
-        actions: [
-          {
-            tag: 'button',
-            text: {
-              tag: 'plain_text',
-              content: '查看会议文档',
-            },
-            type: 'primary',
-            url: result.meetingDoc?.url || '',
-          },
-        ],
-      },
-    ],
-  };
 }

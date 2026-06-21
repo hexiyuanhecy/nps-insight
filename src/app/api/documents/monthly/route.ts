@@ -91,10 +91,10 @@ async function generateMonthlyReport(year?: number, month?: number): Promise<{
       const issues = await topIssuesGenerator.generate();
 
       topIssues = issues.slice(0, 20).map((issue) => ({
-        tag1: issue.tag1,
-        tag2: issue.tag2,
-        tag3: issue.tag3,
-        count: issue.count,
+        tag1: issue.tag2Name,
+        tag2: issue.tag2Name,
+        tag3: issue.tag3Names.join(', '),
+        count: issue.totalCount,
       }));
     } catch (topError) {
       console.error('[月报] Top问题生成失败', topError);
@@ -167,6 +167,7 @@ async function generateMonthlyReport(year?: number, month?: number): Promise<{
       passive: 0,
       detractor: 0,
       error: error instanceof Error ? error.message : '未知错误',
+      topIssues: [],
     };
   }
 }
@@ -334,7 +335,7 @@ export async function POST(request: NextRequest) {
 
     // 保存到分析表
     try {
-      await bitableClient.createRecord(TABLE_NAMES.ANALYSIS, {
+      await bitableClient.createRecord(TABLE_NAMES.TOP_ISSUES, {
         ['问题标识']: `monthly_${result.year}_${String(result.month).padStart(2, '0')}`,
         ['问题名称']: result.periodName,
         ['开始日期']: new Date(result.startDate).getTime(),

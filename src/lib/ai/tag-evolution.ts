@@ -82,7 +82,7 @@ export class TagEvolution {
 
   constructor(storage?: StorageAdapter) {
     this.storage = storage || getDefaultStorage();
-    this.similarityThreshold = 0.85;
+    this.similarityThreshold = 0.9;
     this.splitThreshold = 10;
   }
 
@@ -120,6 +120,18 @@ export class TagEvolution {
       report.splittables = await this.detectSplittables(tag2List, tag3List);
       console.log(`[自进化] 检测到 ${report.splittables.length} 个可拆分标签`);
 
+      // 自动执行拆分
+      for (const splittable of report.splittables) {
+        const newTagNames = splittable.distribution
+          .filter(d => d.percentage > 60)
+          .slice(0, 3)
+          .map(d => d.name);
+        if (newTagNames.length > 0) {
+          await this.executeSplit(splittable.tag, newTagNames);
+          report.actions.push({ type: 'split', result: { tag: splittable.tag.fields.name, newTags: newTagNames } });
+        }
+      }
+
       report.coldTags = this.detectColdTags(tag1List, tag2List, tag3List);
       console.log(`[自进化] 检测到 ${report.coldTags.length} 个冷门标签（保留不处理）`);
 
@@ -141,20 +153,19 @@ export class TagEvolution {
 
     const detectInList = async (list: TagRecord[]): Promise<TagDuplicate[]> => {
       const result: TagDuplicate[] = [];
-      const activeTags = list.filter(t => t.fields.status !== 'inactive');
 
-      for (let i = 0; i < activeTags.length; i++) {
-        for (let j = i + 1; j < activeTags.length; j++) {
-          const similarity = calculateSimilarity(activeTags[i].fields.name, activeTags[j].fields.name);
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const similarity = calculateSimilarity(list[i].fields.name, list[j].fields.name);
 
           if (similarity > this.similarityThreshold) {
             const affectedCount = await this.getAffectedFeedbackCount(
-              [activeTags[i].fields.name, activeTags[j].fields.name],
-              activeTags[i].fields.level
+              [list[i].fields.name, list[j].fields.name],
+              list[i].fields.level
             );
 
             result.push({
-              tags: [activeTags[i], activeTags[j]],
+              tags: [list[i], list[j]],
               similarity,
               suggestion: '合并',
               affectedFeedbackCount: affectedCount,
@@ -177,8 +188,8 @@ export class TagEvolution {
   private async detectSplittables(tag2List: TagRecord[], tag3List: TagRecord[]): Promise<TagSplittable[]> {
     const splittables: TagSplittable[] = [];
 
-    const activeTag2 = tag2List.filter(t => t.fields.status !== 'inactive');
-    const activeTag3 = tag3List.filter(t => t.fields.status !== 'inactive');
+    const activeTag2 = tag2List;
+    const activeTag3 = tag3List;
 
     for (const tag2 of activeTag2) {
       const tag3UnderTag2 = activeTag3.filter(t =>
@@ -215,7 +226,6 @@ export class TagEvolution {
 
     const detectInList = (list: TagRecord[]): TagCold[] => {
       return list
-        .filter(t => t.fields.status !== 'inactive')
         .filter(t => (t.fields.usageCount || 0) < 5)
         .map(t => ({
           tag: t,
@@ -239,7 +249,6 @@ export class TagEvolution {
 
     const detectInList = (list: TagRecord[]): TagRecord[] => {
       return list
-        .filter(t => t.fields.status !== 'inactive')
         .filter(t => (t.fields.usageCount || 0) > 20);
     };
 
@@ -305,13 +314,9 @@ export class TagEvolution {
     const mergedTag = await this.storage.createRecord(table, {
       [fields.TAG_ID]: `${Date.now()}`,
       [fields.NAME]: mergedName,
-      [fields.DEFINITION]: `合并自 ${tag1.fields.name} 和 ${tag2.fields.name}`,
       [fields.USAGE_COUNT]: (tag1.fields.usageCount || 0) + (tag2.fields.usageCount || 0),
       [fields.LARGE_TENANT_COUNT]: Math.max(tag1.fields.largeTenantCount || 0, tag2.fields.largeTenantCount || 0),
       [fields.LARGE_TENANT_RATIO]: 0,
-      [fields.STATUS]: 'active',
-      [fields.CREATED_BY]: 'AI自进化',
-      [fields.CREATED_AT]: Date.now(),
     });
 
     const feedbacks = await this.storage.listRecords(TABLES.FEEDBACK, { pageSize: 500 });
@@ -327,12 +332,9 @@ export class TagEvolution {
 
     for (const feedback of affectedFeedbacks) {
       await this.storage.updateRecord(TABLES.FEEDBACK, feedback.record_id, {
-        [fbField]: mergedName,
+        [fbField]: [mergedName],
       });
     }
-
-    await this.storage.updateRecord(table, tag1.record_id, { [fields.STATUS]: 'inactive' });
-    await this.storage.updateRecord(table, tag2.record_id, { [fields.STATUS]: 'inactive' });
 
     console.log(`[自进化] 合并完成，已更新 ${affectedFeedbacks.length} 条反馈`);
   }
@@ -351,13 +353,9 @@ export class TagEvolution {
         fields: {
           [fields.TAG_ID]: `${Date.now()}-${name}`,
           [fields.NAME]: name,
-          [fields.DEFINITION]: `拆分自 ${originalTag.fields.name}`,
           [fields.USAGE_COUNT]: 0,
           [fields.LARGE_TENANT_COUNT]: 0,
           [fields.LARGE_TENANT_RATIO]: 0,
-          [fields.STATUS]: 'active',
-          [fields.CREATED_BY]: 'AI自进化',
-          [fields.CREATED_AT]: Date.now(),
         },
       }))
     );
@@ -372,8 +370,6 @@ export class TagEvolution {
       const tagValue = String(f.fields[fbField] || '');
       return tagValue === originalTag.fields.name;
     });
-
-    await this.storage.updateRecord(table, originalTag.record_id, { [fields.STATUS]: 'inactive' });
 
     console.log(`[自进化] 拆分完成，已创建 ${newTagRecords.length} 个新标签`);
   }

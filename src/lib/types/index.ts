@@ -7,14 +7,16 @@
 // 基础枚举类型
 // ============================================
 
-/** 反馈处理状态 — 与多维表格单选字段值严格对应 */
+/** 反馈处理状态 */
 export enum FeedbackStatus {
-  PENDING = '待审核',       // 待审核
-  REVIEWED = '已审核',      // 已审核
-  NO_REVIEW = '无需审核',   // 无需审核
+  NEW = 'new',           // 新提交
+  PENDING = 'pending',   // 待处理
+  PROCESSING = 'processing', // 处理中
+  RESOLVED = 'resolved', // 已解决
+  CLOSED = 'closed',     // 已关闭
 }
 
-/** 优先级（保留用于内部逻辑，不写入多维表格） */
+/** 优先级 */
 export enum Priority {
   URGENT = 'urgent',     // 紧急
   HIGH = 'high',         // 高
@@ -55,14 +57,10 @@ export interface Feedback {
   feedbackId: string;
   /** 租户ID */
   tenantId: string;
-  /** 租户名称 */
-  tenantName?: string;
-  /** 租户规模 */
-  tenantScale?: string;
   /** 用户ID */
-  userId?: string;
+  userId: string;
   /** 用户名称 */
-  userName?: string;
+  userName: string;
   /** 创建时间 */
   createTime: string;
   /** 所属模块/产品 */
@@ -79,89 +77,21 @@ export interface Feedback {
   tag2?: string;
   /** 三级标签 */
   tag3?: string;
-  /** 打标置信度 */
-  confidence?: number;
-  /** 打标时间 */
-  tagTime?: string;
+  /** AI生成的摘要 */
+  summary?: string;
+  /** AI建议 */
+  suggestions?: string;
+  /** 优先级 */
+  priority: Priority;
   /** 处理状态 */
   status: FeedbackStatus;
+  /** 处理人ID */
+  assigneeId?: string;
   /** 记录ID（飞书多维表格内部ID） */
   recordId?: string;
 }
 
-/** 一级标签 */
-export interface Tag1 {
-  /** 标签唯一标识 */
-  tagId: string;
-  /** 标签名称 */
-  name: string;
-  /** 标签定义 */
-  definition: string;
-  /** 使用次数 */
-  usageCount: number;
-  /** 大租户数 */
-  largeTenantCount: number;
-  /** 大租户占比 */
-  largeTenantRatio: number;
-  /** 状态 */
-  status: TagStatus;
-  /** 创建人 */
-  createdBy: string;
-  /** 创建时间 */
-  createdAt: string;
-  /** 记录ID（飞书多维表格内部ID） */
-  recordId?: string;
-}
-
-/** 二级标签 */
-export interface Tag2 {
-  /** 标签唯一标识 */
-  tagId: string;
-  /** 标签名称 */
-  name: string;
-  /** 标签定义 */
-  definition: string;
-  /** 使用次数 */
-  usageCount: number;
-  /** 大租户数 */
-  largeTenantCount: number;
-  /** 大租户占比 */
-  largeTenantRatio: number;
-  /** 状态 */
-  status: TagStatus;
-  /** 创建人 */
-  createdBy: string;
-  /** 创建时间 */
-  createdAt: string;
-  /** 记录ID（飞书多维表格内部ID） */
-  recordId?: string;
-}
-
-/** 三级标签 */
-export interface Tag3 {
-  /** 标签唯一标识 */
-  tagId: string;
-  /** 标签名称 */
-  name: string;
-  /** 标签定义 */
-  definition: string;
-  /** 使用次数 */
-  usageCount: number;
-  /** 大租户数 */
-  largeTenantCount: number;
-  /** 大租户占比 */
-  largeTenantRatio: number;
-  /** 状态 */
-  status: TagStatus;
-  /** 创建人 */
-  createdBy: string;
-  /** 创建时间 */
-  createdAt: string;
-  /** 记录ID（飞书多维表格内部ID） */
-  recordId?: string;
-}
-
-/** 标签体系（旧类型，保留兼容） */
+/** 标签体系 */
 export interface Tag {
   /** 标签唯一标识 */
   tagId: string;
@@ -343,15 +273,13 @@ export interface CreateFeedbackRequest {
 /** 更新反馈请求 */
 export interface UpdateFeedbackRequest {
   status?: FeedbackStatus;
+  priority?: Priority;
+  assigneeId?: string;
   tag1?: string;
   tag2?: string;
   tag3?: string;
-  tenantName?: string;
-  tenantScale?: string;
-  confidence?: number;
-  content?: string;
-  module?: string;
-  npsScore?: number;
+  summary?: string;
+  suggestions?: string;
 }
 
 /** 创建标签请求 */

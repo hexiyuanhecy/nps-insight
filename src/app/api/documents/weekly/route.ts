@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { bitableClient, extractFieldValue } from '@/lib/feishu/bitable';
-import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
+import { TABLE_NAMES, FEEDBACK_FIELDS, TOP_ISSUES_FIELDS } from '@/lib/feishu/constants';
 import { getDefaultDocument, getDefaultNotification } from '@/lib/adapter-factory';
 import { DocumentAdapter } from '@/lib/document/base-document';
 
@@ -203,19 +203,18 @@ export async function GET(request: NextRequest) {
     }
 
     // 返回周报列表（从分析表筛选）
-    const records = await bitableClient.listRecords(TABLE_NAMES.ANALYSIS, { pageSize: 500 });
+    const records = await bitableClient.listRecords(TABLE_NAMES.TOP_ISSUES, { pageSize: 500 });
 
     const weeklyReports = records
       .filter((r) => {
-        const name = extractFieldValue(r.fields['问题名称'] || r.fields['periodName'] || '');
+        const name = extractFieldValue(r.fields[TOP_ISSUES_FIELDS.TAG2_NAME] || '');
         return name.includes('周报') || name.includes('周');
       })
       .map((r) => ({
-        periodId: extractFieldValue(r.fields['问题标识'] || r.fields['periodId'] || ''),
-        periodName: extractFieldValue(r.fields['问题名称'] || r.fields['periodName'] || ''),
-        totalFeedbacks: Number(r.fields['反馈总数'] || r.fields['totalFeedbacks'] || 0),
-        npsScore: Number(r.fields['NPS分数'] || r.fields['npsScore'] || 0),
-        createdAt: extractFieldValue(r.fields['创建时间'] || r.fields['createdAt'] || ''),
+        periodId: extractFieldValue(r.fields[TOP_ISSUES_FIELDS.ISSUE_KEY] || ''),
+        periodName: extractFieldValue(r.fields[TOP_ISSUES_FIELDS.TAG2_NAME] || ''),
+        totalFeedbacks: Number(r.fields[TOP_ISSUES_FIELDS.TOTAL_COUNT] || 0),
+        npsScore: Number(r.fields[TOP_ISSUES_FIELDS.AVG_SCORE] || 0),
         recordId: r.record_id,
       }));
 
@@ -243,15 +242,12 @@ export async function POST(request: NextRequest) {
 
     // 保存到分析表
     try {
-      await bitableClient.createRecord(TABLE_NAMES.ANALYSIS, {
-        ['问题标识']: `weekly_${result.year}_W${result.weekNumber}`,
-        ['问题名称']: `第${result.weekNumber}周周报`,
-        ['开始日期']: new Date(result.startDate).getTime(),
-        ['结束日期']: new Date(result.endDate).getTime(),
-        ['反馈总数']: result.totalFeedbacks,
-        ['NPS分数']: result.npsScore,
-        ['Top问题']: JSON.stringify(result.topIssues),
-        ['创建时间']: Date.now(),
+      await bitableClient.createRecord(TABLE_NAMES.TOP_ISSUES, {
+        [TOP_ISSUES_FIELDS.TAG2_NAME]: `第${result.weekNumber}周周报`,
+        [TOP_ISSUES_FIELDS.TAG3_NAMES]: ['周报'],
+        [TOP_ISSUES_FIELDS.TOTAL_COUNT]: result.totalFeedbacks,
+        [TOP_ISSUES_FIELDS.PERIOD_NEW_COUNT]: result.totalFeedbacks,
+        [TOP_ISSUES_FIELDS.AVG_SCORE]: result.npsScore,
       });
     } catch (saveError) {
       console.error('[API] 保存周报记录失败', saveError);

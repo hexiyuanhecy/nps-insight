@@ -63,7 +63,7 @@ function generateMockData(count: number = 200) {
       source,
       tenant_id: `TENANT${Math.floor(Math.random() * 10000)}`,
       tenant_name: tenantName,
-      tenant_scale: ['A1', 'A2', 'A3', 'A4', 'A5'][Math.floor(Math.random() * 5)],
+      tenant_scale: ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'][Math.floor(Math.random() * 6)],
       user_id: `USER${Math.floor(Math.random() * 100000)}`,
     });
   }

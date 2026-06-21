@@ -6,22 +6,27 @@
 import { StorageAdapter, TABLES } from '../storage/base-storage';
 import { getDefaultStorage } from '../adapter-factory';
 import { BitableRecord } from '@/lib/types';
-import { ANALYSIS_FIELDS, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS, FEEDBACK_FIELDS } from '../feishu/constants';
+import { TOP_ISSUES_FIELDS, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS, FEEDBACK_FIELDS } from '../feishu/constants';
 
 /**
- * Top问题记录
+ * Top问题记录（PRD v6.0）
+ * 一个Top问题 = 一个 Tag2 + Tag3 组合
  */
 export interface TopIssue {
-  issueKey: string;
-  tag1: string;
-  tag2: string;
-  tag3: string;
+  tag2Name: string;
+  tag3Names: string[];
+  issueKey: string; // tag2Name - tag3Name
   totalCount: number;
+  periodNewCount: number;
+  a4Count: number;
+  a5Count: number;
+  a6Count: number;
   largeTenantCount: number;
   largeTenantRatio: number;
   avgScore: number;
-  compositeScore: number;
-  newCount: number;
+  manualPriority: number;
+  owner: string;
+  resolution: string;
   status: string;
 }
 
@@ -47,10 +52,12 @@ interface TagMappings {
  * Top问题分组统计
  */
 interface IssueGroup {
-  tag1: string;
   tag2: string;
   tag3: string;
   totalCount: number;
+  a4Count: number;
+  a5Count: number;
+  a6Count: number;
   largeTenantCount: number;
   totalScore: number;
 }
@@ -102,7 +109,7 @@ export class TopIssuesGenerator {
       const totalCount = allFeedbacks.length;
       const issues = this.calculateScores(groups, totalCount);
 
-      issues.sort((a, b) => b.compositeScore - a.compositeScore);
+      issues.sort((a, b) => b.largeTenantCount - a.largeTenantCount);
       const top30 = issues.slice(0, 30);
 
       console.log(`[Top问题] 生成 Top 30 问题`);
@@ -126,7 +133,7 @@ export class TopIssuesGenerator {
 
     const existingMap = new Map<string, BitableRecord>();
     for (const issue of existingIssues) {
-      const key = String(issue.fields[ANALYSIS_FIELDS.ISSUE_KEY] || '');
+      const key = String(issue.fields[TOP_ISSUES_FIELDS.ISSUE_KEY] || '');
       if (key) {
         existingMap.set(key, issue);
       }
@@ -142,28 +149,34 @@ export class TopIssuesGenerator {
         recordsToUpdate.push({
           record_id: existing.record_id,
           fields: {
-            [ANALYSIS_FIELDS.TOTAL_COUNT]: issue.totalCount,
-            [ANALYSIS_FIELDS.LARGE_TENANT_COUNT]: issue.largeTenantCount,
-            [ANALYSIS_FIELDS.LARGE_TENANT_RATIO]: issue.largeTenantRatio,
-            [ANALYSIS_FIELDS.AVG_SCORE]: issue.avgScore,
-            [ANALYSIS_FIELDS.COMPOSITE_SCORE]: issue.compositeScore,
-            [ANALYSIS_FIELDS.NEW_COUNT]: issue.newCount,
+            [TOP_ISSUES_FIELDS.TOTAL_COUNT]: issue.totalCount,
+            [TOP_ISSUES_FIELDS.PERIOD_NEW_COUNT]: issue.periodNewCount,
+            [TOP_ISSUES_FIELDS.A4_COUNT]: issue.a4Count,
+            [TOP_ISSUES_FIELDS.A5_COUNT]: issue.a5Count,
+            [TOP_ISSUES_FIELDS.A6_COUNT]: issue.a6Count,
+            [TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT]: issue.largeTenantCount,
+            [TOP_ISSUES_FIELDS.LARGE_TENANT_RATIO]: issue.largeTenantRatio,
+            [TOP_ISSUES_FIELDS.AVG_SCORE]: issue.avgScore,
           },
         });
       } else {
         recordsToCreate.push({
           fields: {
-            [ANALYSIS_FIELDS.ISSUE_KEY]: issue.issueKey,
-            [ANALYSIS_FIELDS.TAG1]: issue.tag1,
-            [ANALYSIS_FIELDS.TAG2]: issue.tag2,
-            [ANALYSIS_FIELDS.TAG3]: issue.tag3,
-            [ANALYSIS_FIELDS.TOTAL_COUNT]: issue.totalCount,
-            [ANALYSIS_FIELDS.LARGE_TENANT_COUNT]: issue.largeTenantCount,
-            [ANALYSIS_FIELDS.LARGE_TENANT_RATIO]: issue.largeTenantRatio,
-            [ANALYSIS_FIELDS.AVG_SCORE]: issue.avgScore,
-            [ANALYSIS_FIELDS.COMPOSITE_SCORE]: issue.compositeScore,
-            [ANALYSIS_FIELDS.NEW_COUNT]: issue.newCount,
-            [ANALYSIS_FIELDS.STATUS]: issue.status,
+            [TOP_ISSUES_FIELDS.TAG2_NAME]: issue.tag2Name,
+            [TOP_ISSUES_FIELDS.TAG3_NAMES]: issue.tag3Names,
+            [TOP_ISSUES_FIELDS.ISSUE_KEY]: issue.issueKey,
+            [TOP_ISSUES_FIELDS.TOTAL_COUNT]: issue.totalCount,
+            [TOP_ISSUES_FIELDS.PERIOD_NEW_COUNT]: issue.periodNewCount,
+            [TOP_ISSUES_FIELDS.A4_COUNT]: issue.a4Count,
+            [TOP_ISSUES_FIELDS.A5_COUNT]: issue.a5Count,
+            [TOP_ISSUES_FIELDS.A6_COUNT]: issue.a6Count,
+            [TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT]: issue.largeTenantCount,
+            [TOP_ISSUES_FIELDS.LARGE_TENANT_RATIO]: issue.largeTenantRatio,
+            [TOP_ISSUES_FIELDS.AVG_SCORE]: issue.avgScore,
+            [TOP_ISSUES_FIELDS.MANUAL_PRIORITY]: issue.manualPriority,
+            [TOP_ISSUES_FIELDS.OWNER]: issue.owner,
+            [TOP_ISSUES_FIELDS.RESOLUTION]: issue.resolution,
+            [TOP_ISSUES_FIELDS.STATUS]: issue.status,
           },
         });
       }
@@ -240,16 +253,16 @@ export class TopIssuesGenerator {
   /**
    * 构建问题标识
    */
-  private buildIssueKey(tag1: string, tag2: string, tag3: string): string {
-    return `${tag1}||${tag2}||${tag3}`;
+  private buildIssueKey(_tag1: string, tag2: string, tag3: string): string {
+    return `${tag2}||${tag3}`;
   }
 
   /**
-   * 判断是否为大租户
+   * 判断是否为大租户（A4/A5/A6）
    */
   private isLargeTenant(scale: unknown): boolean {
     const scaleStr = String(scale || '');
-    return ['A4', 'A5'].includes(scaleStr);
+    return ['A4', 'A5', 'A6'].includes(scaleStr);
   }
 
   /**
@@ -260,25 +273,26 @@ export class TopIssuesGenerator {
   }
 
   /**
-   * 按 Tag1+Tag2+Tag3 组合分组统计反馈数据
+   * 按 Tag2+Tag3 组合分组统计反馈数据（PRD v6.0）
    */
   private aggregateFeedbackData(feedbacks: BitableRecord[]): Map<string, IssueGroup> {
     const groups = new Map<string, IssueGroup>();
 
     for (const feedback of feedbacks) {
-      const tag1 = this.getTagNameFromRecordId(feedback.fields[FEEDBACK_FIELDS.TAG1], 'tag1');
       const tag2 = this.getTagNameFromRecordId(feedback.fields[FEEDBACK_FIELDS.TAG2], 'tag2');
       const tag3 = this.getTagNameFromRecordId(feedback.fields[FEEDBACK_FIELDS.TAG3], 'tag3');
 
-      const issueKey = this.buildIssueKey(tag1, tag2, tag3);
+      const issueKey = this.buildIssueKey('', tag2, tag3);
 
       let group = groups.get(issueKey);
       if (!group) {
         group = {
-          tag1,
           tag2,
           tag3,
           totalCount: 0,
+          a4Count: 0,
+          a5Count: 0,
+          a6Count: 0,
           largeTenantCount: 0,
           totalScore: 0,
         };
@@ -286,6 +300,11 @@ export class TopIssuesGenerator {
       }
 
       group.totalCount++;
+
+      const scale = String(feedback.fields[FEEDBACK_FIELDS.TENANT_SCALE] || '');
+      if (scale === 'A4') group.a4Count++;
+      else if (scale === 'A5') group.a5Count++;
+      else if (scale === 'A6') group.a6Count++;
 
       if (this.isLargeTenant(feedback.fields[FEEDBACK_FIELDS.TENANT_SCALE])) {
         group.largeTenantCount++;
@@ -305,26 +324,25 @@ export class TopIssuesGenerator {
 
     Array.from(groups.entries()).forEach(([issueKey, group]) => {
       const avgScore = group.totalCount > 0 ? group.totalScore / group.totalCount : 0;
-      const countScore = totalFeedbackCount > 0 ? (group.totalCount / totalFeedbackCount) * 100 : 0;
-      const largeTenantRatio = group.totalCount > 0 ? group.largeTenantCount / group.totalCount : 0;
-      const qualityScore = 10 - avgScore;
 
-      const compositeScore =
-        countScore * this.weights.count +
-        largeTenantRatio * 100 * this.weights.largeTenant +
-        qualityScore * this.weights.quality;
+      const largeTenantCount = group.a4Count + group.a5Count + group.a6Count;
+      const largeTenantRatio = group.totalCount > 0 ? largeTenantCount / group.totalCount : 0;
 
       issues.push({
-        issueKey,
-        tag1: group.tag1,
-        tag2: group.tag2,
-        tag3: group.tag3,
+        tag2Name: group.tag2,
+        tag3Names: [group.tag3],
+        issueKey: `${group.tag2} - ${group.tag3}`,
         totalCount: group.totalCount,
-        largeTenantCount: group.largeTenantCount,
+        periodNewCount: 0,
+        a4Count: group.a4Count,
+        a5Count: group.a5Count,
+        a6Count: group.a6Count,
+        largeTenantCount,
         largeTenantRatio: Math.round(largeTenantRatio * 100) / 100,
         avgScore: Math.round(avgScore * 100) / 100,
-        compositeScore: Math.round(compositeScore * 100) / 100,
-        newCount: 0,
+        manualPriority: 0,
+        owner: '',
+        resolution: '',
         status: '待讨论',
       });
     });
