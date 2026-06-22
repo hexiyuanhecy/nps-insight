@@ -27,6 +27,7 @@ export function generateTaggingPrompt(
 3. Tag3 是具体问题描述（可多选）。从用户原话中提炼，保留用户语言。
 4. confidence 为确定性评分(0.00-1.00)。使用全新Tag2/Tag3时大概率会降低至0.8以下，但具体以 ai 实际分析结果为主。
 5. needLogCheck 为true当且仅当：反馈描述卡顿/白屏/闪退/加载失败等技术现象，且无法仅从文本判断根因。
+6. 若反馈内容非中文，先将内容翻译为中文再分析，翻译结果填入 translatedContent 字段。
 
 【已有标签】
 Tag1: ${tag1List.join(', ')}
@@ -82,6 +83,7 @@ export function generateBatchTaggingPrompt(
 3. Tag3 是具体问题描述（可多选）。从用户原话中提炼，保留用户语言。
 4. confidence 为确定性评分(0.00-1.00)。
 5. needLogCheck 为true当且仅当：反馈描述卡顿/白屏/闪退/加载失败等技术现象。
+6. 若反馈内容非中文，先将内容翻译为中文再分析，翻译结果填入 translatedContent 字段。
 
 【已有标签】
 Tag1: ${tag1List.join(', ')}

@@ -462,6 +462,7 @@ async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
             [FEEDBACK_FIELDS.CONFIDENCE]: r.result!.confidence,
             [FEEDBACK_FIELDS.NEED_LOG_CHECK]: r.result!.needLogCheck,
             [FEEDBACK_FIELDS.REVIEW_NEEDED]: r.result!.reviewNeeded,
+            [FEEDBACK_FIELDS.TRANSLATED_CONTENT]: r.result!.translatedContent || '',
             [FEEDBACK_FIELDS.STATUS]: '已打标',
           },
         }));
