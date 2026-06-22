@@ -92,12 +92,10 @@ export async function createNPSInsightBitable(
 
   const appToken = appData.data?.app?.app_token;
 
-  // 2. 先创建三张标签表（供反馈表关联使用）
-  const [tag1TableId, tag2TableId, tag3TableId] = await Promise.all([
-    createTag1Table(token, appToken),
-    createTag2Table(token, appToken),
-    createTag3Table(token, appToken),
-  ]);
+  // 2. 先创建三张标签表（供反馈表关联使用，需串行创建因存在关联依赖）
+  const tag1TableId = await createTag1Table(token, appToken);
+  const tag2TableId = await createTag2Table(token, appToken, tag1TableId);
+  const tag3TableId = await createTag3Table(token, appToken, tag2TableId);
 
   // 3. 创建其他表（反馈表需要引用标签表ID）
   const [feedbackTableId, tenantTableId, periodTableId] = await Promise.all([
@@ -411,9 +409,9 @@ async function createTag1Table(token: string, appToken: string): Promise<string>
 
 /**
  * 创建「Tag2表」（二级标签表）
- * 字段：tagId、name、definition、usageCount、largeTenantCount、largeTenantRatio、status、createdBy、createdAt
+ * 字段：tagId、name、definition、所属一级标签(关联Tag1)、usageCount、largeTenantCount、largeTenantRatio、status、createdBy、createdAt
  */
-async function createTag2Table(token: string, appToken: string): Promise<string> {
+async function createTag2Table(token: string, appToken: string, tag1TableId: string): Promise<string> {
   const response = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/tables`, {
     method: 'POST',
     headers: {
@@ -426,6 +424,7 @@ async function createTag2Table(token: string, appToken: string): Promise<string>
         fields: [
           { field_name: 'tagId', type: 1 },
           { field_name: 'name', type: 1 },
+          { field_name: '所属一级标签', type: 16, property: { foreign_table_id: tag1TableId } },
           { field_name: 'definition', type: 1 },
           { field_name: 'usageCount', type: 2 },
           { field_name: 'largeTenantCount', type: 2 },
@@ -457,10 +456,10 @@ async function createTag2Table(token: string, appToken: string): Promise<string>
 
 /**
  * 创建「Tag3表」（三级标签表）
- * 字段：tagId、name、definition、usageCount、largeTenantCount、largeTenantRatio、status、createdBy、createdAt
+ * 字段：tagId、name、所属二级标签(关联Tag2)、definition、usageCount、largeTenantCount、largeTenantRatio、status、createdBy、createdAt
  * status 选项包含"待确认"
  */
-async function createTag3Table(token: string, appToken: string): Promise<string> {
+async function createTag3Table(token: string, appToken: string, tag2TableId: string): Promise<string> {
   const response = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/tables`, {
     method: 'POST',
     headers: {
@@ -473,6 +472,7 @@ async function createTag3Table(token: string, appToken: string): Promise<string>
         fields: [
           { field_name: 'tagId', type: 1 },
           { field_name: 'name', type: 1 },
+          { field_name: '所属二级标签', type: 16, property: { foreign_table_id: tag2TableId } },
           { field_name: 'definition', type: 1 },
           { field_name: 'usageCount', type: 2 },
           { field_name: 'largeTenantCount', type: 2 },
