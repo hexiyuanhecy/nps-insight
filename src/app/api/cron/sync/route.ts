@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { AdapterFactory } from '@/lib/data-sources/adapter-factory';
 import { LLMProviderFactory } from '@/lib/llm/provider-factory';
 import { bitableClient } from '@/lib/feishu/bitable';
-import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
+import { TABLE_NAMES, FEEDBACK_FIELDS, TENANT_FIELDS } from '@/lib/feishu/constants';
 import { feishuBot, createWeeklyReportCard } from '@/lib/feishu/bot';
 import { tagger } from '@/lib/ai/tagger';
 import { SyncResult } from '@/lib/types';
@@ -363,6 +363,9 @@ async function syncExternalData(): Promise<number> {
     }
     console.log(`[Cron] 去重后新增 ${filteredFeedbacks.length} 条反馈（跳过 ${existingFeedbackIds.size} 条重复）`);
 
+    // 步骤2.5：租户信息查询 — 补充新租户名称
+    const tenantNameMap = await enrichTenantInfo(filteredFeedbacks);
+
     // 步骤3：批量写入
     const records = filteredFeedbacks.map((f) => ({
       fields: {
@@ -373,7 +376,7 @@ async function syncExternalData(): Promise<number> {
         [FEEDBACK_FIELDS.UNSATISFACTION_REASON]: f.module || '',
         [FEEDBACK_FIELDS.SOURCE]: f.source || '',
         [FEEDBACK_FIELDS.TENANT_ID]: f.tenantId || '',
-        [FEEDBACK_FIELDS.TENANT_NAME]: f.tenantName || '',
+        [FEEDBACK_FIELDS.TENANT_NAME]: tenantNameMap.get(f.tenantId ?? '') || f.tenantName || '',
         [FEEDBACK_FIELDS.TENANT_SCALE]: f.tenantScale || '',
         [FEEDBACK_FIELDS.USER_ID]: f.larkUserId || '',
         [FEEDBACK_FIELDS.STATUS]: '未打标',
@@ -644,6 +647,116 @@ function getISOWeek(date: Date): number {
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
+
+/**
+ * 租户信息查询与补充
+ * 1. 从租户表读取已有 tenantId -> tenantName 映射
+ * 2. 找出新反馈中未知的租户
+ * 3. 调用外部查询接口批量获取名称
+ * 4. 写入新租户记录到租户表
+ * @returns tenantId -> tenantName 映射
+ */
+async function enrichTenantInfo(
+  feedbacks: Array<{ tenantId?: string; tenantName?: string }>
+): Promise<Map<string, string>> {
+  // 收集所有唯一的 tenantId
+  const tenantIds = new Set<string>();
+  for (const f of feedbacks) {
+    if (f.tenantId) tenantIds.add(f.tenantId);
+  }
+
+  if (tenantIds.size === 0) {
+    console.log('[Cron] 无租户信息需要查询');
+    return new Map();
+  }
+
+  // 1. 读取已有租户映射
+  let existingTenants: Array<{ record_id: string; tenantId: string; tenantName: string }> = [];
+  try {
+    const records = await bitableClient.listRecords(TABLE_NAMES.TENANTS, { pageSize: 500 });
+    existingTenants = records
+      .filter((r) => String(r.fields[TENANT_FIELDS.TENANT_ID]))
+      .map((r) => ({
+        record_id: r.record_id,
+        tenantId: String(r.fields[TENANT_FIELDS.TENANT_ID]),
+        tenantName: String(r.fields[TENANT_FIELDS.TENANT_NAME] || ''),
+      }));
+  } catch (error) {
+    console.error('[Cron] 读取租户表失败', error);
+  }
+
+  const knownMap = new Map(existingTenants.map((t) => [t.tenantId, t.tenantName]));
+  const unknownIds: string[] = [];
+  for (const id of Array.from(tenantIds)) {
+    if (!knownMap.has(id)) {
+      unknownIds.push(id);
+    }
+  }
+
+  if (unknownIds.length === 0) {
+    console.log(`[Cron] 所有 ${tenantIds.size} 个租户已在租户信息表中`);
+    return knownMap;
+  }
+
+  console.log(`[Cron] 发现 ${unknownIds.length} 个新租户，开始查询: ${unknownIds.slice(0, 5).join(', ')}...`);
+
+  // 2. 调用外部租户查询接口
+  const queryUrl = process.env.TENANT_QUERY_URL;
+  if (!queryUrl) {
+    console.warn('[Cron] 未配置 TENANT_QUERY_URL，跳过新租户查询');
+    // 仍写入租户表，名称留空
+    for (const id of unknownIds) {
+      knownMap.set(id, '');
+      try {
+        await bitableClient.createRecord(TABLE_NAMES.TENANTS, {
+          [TENANT_FIELDS.TENANT_ID]: id,
+          [TENANT_FIELDS.TENANT_NAME]: '',
+          [TENANT_FIELDS.CREATED_AT]: Date.now(),
+        });
+      } catch (err) {
+        console.error(`[Cron] 写入新租户 ${id} 失败:`, err);
+      }
+    }
+    return knownMap;
+  }
+
+  // 3. 批量查询
+  let queried: Record<string, string> = {};
+  try {
+    const resp = await fetch(queryUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenantIds: unknownIds }),
+    });
+
+    if (resp.ok) {
+      const data = await resp.json();
+      queried = data.tenants || data.data || {};
+    }
+  } catch (error) {
+    console.error('[Cron] 租户查询接口调用失败', error);
+  }
+
+  // 4. 写入新租户记录
+  for (const id of unknownIds) {
+    const name = queried[id] || '';
+    knownMap.set(id, name);
+
+    try {
+      await bitableClient.createRecord(TABLE_NAMES.TENANTS, {
+        [TENANT_FIELDS.TENANT_ID]: id,
+        [TENANT_FIELDS.TENANT_NAME]: name,
+        [TENANT_FIELDS.CREATED_AT]: Date.now(),
+      });
+      console.log(`[Cron] 新增租户: ${id} -> ${name || '(名称未知)'}`);
+    } catch (err) {
+      console.error(`[Cron] 写入新租户 ${id} 失败:`, err);
+    }
+  }
+
+  console.log(`[Cron] 租户查询完成: ${unknownIds.length} 个新租户，${Object.keys(queried).length} 个有名称`);
+  return knownMap;
 }
 
 /**
