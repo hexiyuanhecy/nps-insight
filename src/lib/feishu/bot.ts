@@ -975,17 +975,30 @@ export function createMonthlyReportCard(data: {
   dashboardUrl?: string;
   mergeCount: number;
   splitCount: number;
+  topIssues?: Array<{ tag3: string; tag2: string; count: number; largeTenantRatio: number }>;
 }): InteractiveMessageContent {
-  const { periodName, topIssueUrl, documentUrl, dashboardUrl, mergeCount, splitCount } = data;
+  const { periodName, topIssueUrl, documentUrl, dashboardUrl, mergeCount, splitCount, topIssues } = data;
 
   const elements: Record<string, unknown>[] = [
     { tag: 'div', text: { tag: 'lark_md', content: `**📈 【Feelgood月度分析】${periodName}**` } },
     { tag: 'hr' },
-    { tag: 'div', text: { tag: 'lark_md', content: `**📋 Top问题已更新至分析表**` } },
+  ];
+
+  // Top 问题摘要
+  if (topIssues && topIssues.length > 0) {
+    const summary = topIssues.slice(0, 5).map((issue, i) =>
+      `${i + 1}. ${issue.tag3} (${issue.tag2}) - ${issue.count}次，大租户占${Math.round(issue.largeTenantRatio * 100)}%`
+    ).join('\n');
+    elements.push({ tag: 'div', text: { tag: 'lark_md', content: `**📋 Top 问题概览：**\n${summary}` } });
+  } else {
+    elements.push({ tag: 'div', text: { tag: 'lark_md', content: `**📋 Top问题已更新至分析表**` } });
+  }
+
+  elements.push(
     { tag: 'div', text: { tag: 'lark_md', content: `**📄 会议准备文档已生成**` } },
     { tag: 'div', text: { tag: 'lark_md', content: `**🔗 可视化仪表盘**` } },
     { tag: 'div', text: { tag: 'lark_md', content: `**🔄 本期标签自进化：合并标签${mergeCount}组，拆分建议${splitCount}项**` } },
-  ];
+  );
 
   const actions: Record<string, unknown>[] = [];
   if (topIssueUrl) actions.push({ tag: 'button', text: { tag: 'plain_text', content: 'Top问题表' }, type: 'primary', url: topIssueUrl });

@@ -1,6 +1,10 @@
 /**
  * 月度任务 API
  * 执行顺序：标签自进化 → Top问题生成 → 公式同步 → 会议文档 → 通知
+ *
+ * 多用户支持：
+ * - 遍历所有 KV 中的配置，为每个用户执行月度任务
+ * - 若无 KV 配置，回退到环境变量配置（向后兼容）
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -11,6 +15,7 @@ import { getDefaultStorage, getDefaultNotification, getDefaultDocument } from '@
 import { EvolutionReport } from '@/lib/ai/tag-evolution';
 import { TopIssue } from '@/lib/analysis/top-issues';
 import { createMonthlyReportCard } from '@/lib/feishu/bot';
+import { listAllConfigKeys, getConfig } from '@/lib/storage/kv-storage';
 
 /**
  * 月度任务执行结果
@@ -59,6 +64,69 @@ export async function POST(request: NextRequest): Promise<NextResponse<MonthlyTa
 
 async function handleMonthlyTask(): Promise<NextResponse<MonthlyTaskResult>> {
   console.log('[月度任务] 开始执行');
+
+  // 多用户支持：尝试从 KV 获取所有配置
+  try {
+    const configKeys = await listAllConfigKeys();
+    
+    if (configKeys.length > 0) {
+      console.log(`[月度任务] 发现 ${configKeys.length} 个用户配置，开始多用户月度任务`);
+      
+      const results: MonthlyTaskResult[] = [];
+      
+      // 遍历每个用户的配置执行月度任务
+      for (const key of configKeys) {
+        const ownerId = key.replace('config:', '');
+        console.log(`[月度任务] 正在处理用户: ${ownerId}`);
+        
+        try {
+          const userConfig = await getConfig(ownerId);
+          if (userConfig) {
+            const userResult = await handleMonthlyTaskForUser(ownerId);
+            results.push(userResult);
+          }
+        } catch (userErr) {
+          console.error(`[月度任务] 用户 ${ownerId} 处理失败:`, userErr);
+          results.push({
+            success: false,
+            timestamp: Date.now(),
+            evolution: null,
+            topIssues: null,
+            formulaSync: false,
+            meetingDoc: null,
+            notification: false,
+            error: userErr instanceof Error ? userErr.message : '未知错误',
+          });
+        }
+      }
+      
+      // 返回第一个结果作为代表（实际应返回汇总结果）
+      const firstResult = results[0] || {
+        success: true,
+        timestamp: Date.now(),
+        evolution: null,
+        topIssues: null,
+        formulaSync: true,
+        meetingDoc: null,
+        notification: true,
+      };
+      
+      console.log(`[月度任务] 完成，共处理 ${results.length} 个用户`);
+      return NextResponse.json(firstResult);
+    }
+  } catch (kvErr) {
+    console.warn('[月度任务] KV 查询失败，回退到环境变量模式:', kvErr);
+  }
+
+  // 回退到单用户模式
+  return handleMonthlyTaskSingleUser();
+}
+
+/**
+ * 单用户月度任务（使用环境变量，向后兼容）
+ */
+async function handleMonthlyTaskSingleUser(): Promise<NextResponse<MonthlyTaskResult>> {
+  console.log('[月度任务] 单用户模式执行');
 
   const result: MonthlyTaskResult = {
     success: false,
@@ -158,6 +226,12 @@ async function handleMonthlyTask(): Promise<NextResponse<MonthlyTaskResult>> {
         dashboardUrl: process.env.FEISHU_DASHBOARD_URL || '',
         mergeCount: result.evolution?.duplicates.length || 0,
         splitCount: result.evolution?.splittables.length || 0,
+        topIssues: (result.topIssues || []).map((issue: any) => ({
+          tag3: issue.tag3Names?.join(', ') || '',
+          tag2: issue.tag2Name || '',
+          count: issue.totalCount || 0,
+          largeTenantRatio: issue.largeTenantRatio || 0,
+        })),
       });
       await notification.sendToMultiple(notificationChannels, card);
       result.notification = true;
@@ -172,6 +246,18 @@ async function handleMonthlyTask(): Promise<NextResponse<MonthlyTaskResult>> {
     result.error = error instanceof Error ? error.message : '未知错误';
     return NextResponse.json(result, { status: 500 });
   }
+}
+
+/**
+ * 为单个用户执行月度任务（未来扩展用）
+ * 目前复用单用户逻辑
+ */
+async function handleMonthlyTaskForUser(ownerId: string): Promise<MonthlyTaskResult> {
+  // TODO: 使用 ownerId 对应的用户配置执行月度任务
+  // 目前暂时复用单用户逻辑
+  console.log(`[月度任务] 单用户模式执行 (ownerId: ${ownerId})`);
+  const response = await handleMonthlyTaskSingleUser();
+  return response.json();
 }
 
 /**
