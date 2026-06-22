@@ -212,6 +212,21 @@ async function runSyncTaskSingleUser(): Promise<SyncResult> {
       details.push('发送通知成功');
     }
 
+    // 步骤5：生成周报文档
+    if (notificationResult) {
+      try {
+        const docResult = await withTimeout(generateWeeklyDoc(), 30000, 'generateWeeklyDoc');
+        if (docResult) {
+          details.push('生成周报文档成功');
+        } else {
+          details.push('生成周报文档失败');
+        }
+      } catch (docErr) {
+        console.error('[Cron] 周报文档生成失败', docErr);
+        details.push(`生成周报文档失败: ${docErr instanceof Error ? docErr.message : '未知错误'}`);
+      }
+    }
+
     // 更新最后同步时间
     try { await updateLastSyncTime(); } catch { /* skip */ }
 
@@ -267,7 +282,10 @@ async function runSyncTaskForUser(ownerId: string): Promise<SyncResult> {
     }
 
     await generateDailyReport();
-    await sendNotification(syncedCount);
+    const notifOk = await sendNotification(syncedCount);
+    if (notifOk) {
+      await generateWeeklyDoc();
+    }
 
     return {
       success: true,
@@ -662,6 +680,38 @@ async function getExistingFeedbackIds(startDate: Date, endDate: Date): Promise<S
   } catch (error) {
     console.error('[Cron] 获取已有反馈ID失败', error);
     return new Set<string>();
+  }
+}
+
+/**
+ * 生成周报文档（调用 POST /api/documents/weekly）
+ */
+async function generateWeeklyDoc(): Promise<boolean> {
+  try {
+    const baseUrl = process.env.VERCEL_URL || 'http://localhost:3000';
+    const url = `${baseUrl}/api/documents/weekly`;
+
+    const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (process.env.CRON_SECRET) {
+      authHeaders['Authorization'] = `Bearer ${process.env.CRON_SECRET}`;
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: authHeaders,
+    });
+
+    if (!response.ok) {
+      console.error(`[Cron] 周报文档 API 返回 HTTP ${response.status}`);
+      return false;
+    }
+
+    const result = await response.json();
+    console.log(`[Cron] 周报文档生成成功: 第${result.data?.weekNumber}周`);
+    return result.success;
+  } catch (error) {
+    console.error('[Cron] 周报文档生成请求失败', error);
+    return false;
   }
 }
 
