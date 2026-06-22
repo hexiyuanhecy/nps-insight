@@ -10,6 +10,7 @@ import { LLMProviderFactory } from '@/lib/llm/provider-factory';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
 import { feishuBot, createWeeklyReportCard } from '@/lib/feishu/bot';
+import { tagger } from '@/lib/ai/tagger';
 import { SyncResult } from '@/lib/types';
 
 // ============================================
@@ -140,7 +141,7 @@ async function runSyncTask(): Promise<SyncResult> {
     }
 
     // 步骤2：对未打标的反馈进行AI批量打标
-    const tagResult = await withTimeout(autoTagFeedbacks(), 30000, 'autoTagFeedbacks');
+    const tagResult = await withTimeout(autoTagFeedbacks(50), 30000, 'autoTagFeedbacks');
     if (tagResult > 0) {
       details.push(`AI自动打标 ${tagResult} 条反馈`);
       syncedCount += tagResult;
@@ -270,110 +271,102 @@ async function syncExternalData(): Promise<number> {
 }
 
 /**
- * 自动对未打标的反馈进行AI打标（多模型LLM）
+ * 自动对未打标的反馈进行AI打标（批量打包，使用 tagger 统一逻辑）
  * @returns 打标的反馈条数
  */
-async function autoTagFeedbacks(): Promise<number> {
+async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
   try {
-    // 获取未打标的反馈
     const filter = JSON.stringify({
       conjunction: 'and',
       conditions: [
-        {
-          field_name: FEEDBACK_FIELDS.STATUS,
-          operator: 'is',
-          value: ['未打标'],
-        },
+        { field_name: FEEDBACK_FIELDS.STATUS, operator: 'is', value: ['未打标'] },
       ],
     });
 
-    const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
+    const allRecords = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
       filter,
-      pageSize: 100,
+      pageSize: 500,
     });
 
-    if (records.length === 0) {
+    if (allRecords.length === 0) {
       console.log('[Cron] 没有需要打标的反馈');
       return 0;
     }
 
-    console.log(`[Cron] 发现 ${records.length} 条未打标反馈，开始AI打标`);
+    console.log(`[Cron] 发现 ${allRecords.length} 条未打标反馈，开始批量AI打标（每批 ${batchSize} 条）`);
 
-    // 获取 LLM Provider
-    const llm = LLMProviderFactory.createFromEnv();
-    console.log(`[Cron] 使用 LLM: ${llm.getProviderType()}`);
+    // 预加载标签（缓存 5 分钟）
+    const existingTags = await tagger.getCachedTags();
+    const tag1List = existingTags.filter(t => t.tag1Name).map(t => t.tag1Name);
+    const tag2List = existingTags.filter(t => t.tag2Name).map(t => t.tag2Name);
+    const tag3List = existingTags.filter(t => t.tag3Name).map(t => t.tag3Name);
+    console.log(`[Cron] 标签体系: Tag1=${tag1List.length}, Tag2=${tag2List.length}, Tag3=${tag3List.length}`);
 
     let successCount = 0;
+    let failCount = 0;
 
-    // 逐条打标
-    for (const record of records) {
-      try {
-        const content = String(record.fields[FEEDBACK_FIELDS.CONTENT] || '');
-        const score = Number(record.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0);
-        const source = String(record.fields[FEEDBACK_FIELDS.SOURCE] || '');
-        const unsatReason = String(record.fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] || '');
+    // 分批处理
+    for (let i = 0; i < allRecords.length; i += batchSize) {
+      const batch = allRecords.slice(i, i + batchSize);
+      const batchNum = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(allRecords.length / batchSize);
+      console.log(`[Cron] 打标批次 ${batchNum}/${totalBatches}（${batch.length} 条）`);
 
-        if (!content) continue;
+      const t0 = Date.now();
 
-        // 构建 Prompt
-        const systemPrompt = `你是一个专业的用户反馈分析助手。你的任务是根据用户反馈内容，提取三个层级的标签。
+      // 构建批量输入
+      const feedbacks = batch.map((record, idx) => ({
+        record_id: record.record_id,
+        content: String(record.fields[FEEDBACK_FIELDS.CONTENT] || ''),
+        score: Number(record.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0),
+        source: String(record.fields[FEEDBACK_FIELDS.SOURCE] || ''),
+        unsatReason: String(record.fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] || ''),
+      }));
 
-## Tag1（一级标签）—— 必须从以下 7 类中选择：
-1. 疑似Bug：功能异常、报错、崩溃、无法使用
-2. 功能优化：功能改进、新功能建议
-3. 界面改进：UI问题、交互优化
-4. 性能提升：加载慢、卡顿、耗电
-5. 用户教育：不知道如何使用
-6. 安全：安全漏洞、隐私问题
-7. 无效：无法分析、垃圾反馈
+      // 使用 tagger 统一打标逻辑
+      const results = await tagger.batchAnalyzeFeedbacks(feedbacks, existingTags);
 
-## Tag2（二级标签）—— 功能模块
-根据反馈内容识别所属功能模块。
+      const elapsed = Date.now() - t0;
+      const batchSuccess = results.filter(r => r.success).length;
+      console.log(`[Cron] 批次 ${batchNum} AI分析完成 (${elapsed}ms, 成功 ${batchSuccess}/${results.length})`);
 
-## Tag3（三级标签）—— 具体问题
-从用户原话中提取最具体的问题描述。
-
-## 输出格式
-必须严格按照以下 JSON 格式输出：
-{"tag1":"一级标签","tag2":"功能模块","tag3":"具体问题"}
-
-规则：
-1. Tag1 必须且只能从上述 7 个固定标签中选择
-2. 如果无法确定 Tag2 或 Tag3，使用空字符串 ""
-3. 如果反馈内容无法分析，Tag1 选择「无效」`;
-
-        const userPrompt = `请分析以下用户反馈，提取标签。
-
-评分：${score} 分（1-5分制）
-反馈内容：${content}${unsatReason ? `\n不满意原因：${unsatReason}` : ''}${source ? `\n来源：${source}` : ''}
-
-请只输出 JSON 格式结果。`;
-
-        const response = await llm.chat([
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ]);
-
-        // 解析 JSON 结果
-        const jsonMatch = response.content.match(/\{[^}]+\}/);
-        if (jsonMatch) {
-          const tags = JSON.parse(jsonMatch[0]);
-
-          await bitableClient.updateRecord(TABLE_NAMES.FEEDBACK, record.record_id, {
-            tag1: tags.tag1 || '',
-            tag2: tags.tag2 || '',
-            tag3: tags.tag3 || '',
+      // 批量更新飞书
+      const updates = results
+        .filter(r => r.success && r.result)
+        .map(r => ({
+          record_id: r.recordId,
+          fields: {
+            [FEEDBACK_FIELDS.TAG1]: r.result!.tag1,
+            [FEEDBACK_FIELDS.TAG2]: r.result!.tag2,
+            [FEEDBACK_FIELDS.TAG3]: r.result!.tag3,
+            [FEEDBACK_FIELDS.CONFIDENCE]: r.result!.confidence,
+            [FEEDBACK_FIELDS.NEED_LOG_CHECK]: r.result!.needLogCheck,
+            [FEEDBACK_FIELDS.REVIEW_NEEDED]: r.result!.reviewNeeded,
             [FEEDBACK_FIELDS.STATUS]: '已打标',
-          });
+          },
+        }));
 
-          successCount++;
+      if (updates.length > 0) {
+        try {
+          await bitableClient.batchUpdateRecords(TABLE_NAMES.FEEDBACK, updates);
+          successCount += updates.length;
+        } catch (updateErr) {
+          console.error(`[Cron] 批量更新失败，逐条更新:`, updateErr);
+          for (const update of updates) {
+            try {
+              await bitableClient.updateRecord(TABLE_NAMES.FEEDBACK, update.record_id, update.fields);
+              successCount++;
+            } catch {
+              failCount++;
+            }
+          }
         }
-      } catch (error) {
-        console.error(`[Cron] 打标失败 [${record.record_id}]`, error);
       }
+
+      failCount += results.filter(r => !r.success).length;
     }
 
-    console.log(`[Cron] AI打标完成，成功 ${successCount}/${records.length}`);
+    console.log(`[Cron] AI打标完成，总计成功 ${successCount}/${allRecords.length}，失败 ${failCount}`);
     return successCount;
   } catch (error) {
     console.error('[Cron] 自动打标失败', error);

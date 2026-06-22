@@ -1,12 +1,65 @@
 /**
  * AI打标引擎（PRD v6.0）
  * 流程：语言检测 → Tag3 → Tag2 → Tag1 → 置信度 → needLogCheck
+ * 支持标签缓存复用，避免每批重复查询
  */
 
 import { chatCompletionJSON } from './index';
-import { generateTaggingPrompt } from './prompts';
+import { generateBatchTaggingPrompt } from './prompts';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, TAG_FIELDS, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
+
+// ============================================
+// 类型定义
+// ============================================
+
+export interface AITagResult {
+  tag1: string[];
+  tag2: string[];
+  tag3: string[];
+  confidence: number;
+  needLogCheck: boolean;
+  reviewNeeded: boolean;
+  translatedContent: string;
+}
+
+export interface TagRecord {
+  tagId: string;
+  tag1Name: string;
+  tag2Name: string;
+  tag3Name: string;
+  usageCount: number;
+  recordId: string;
+}
+
+// ============================================
+// 标签缓存
+// ============================================
+
+let _tagCache: TagRecord[] | null = null;
+let _tagCacheTime = 0;
+const TAG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟缓存
+
+/**
+ * 获取已有标签（带缓存）
+ */
+export async function getCachedTags(): Promise<TagRecord[]> {
+  const now = Date.now();
+  if (_tagCache && now - _tagCacheTime < TAG_CACHE_TTL_MS) {
+    return _tagCache;
+  }
+  _tagCache = await getAllTags();
+  _tagCacheTime = now;
+  return _tagCache;
+}
+
+/**
+ * 清除标签缓存
+ */
+export function invalidateTagCache(): void {
+  _tagCache = null;
+  _tagCacheTime = 0;
+}
 
 // ============================================
 // 单条反馈打标
@@ -14,36 +67,98 @@ import { TABLE_NAMES, TAG_FIELDS, FEEDBACK_FIELDS } from '@/lib/feishu/constants
 
 /**
  * 对单条反馈进行AI打标
- * @param content 反馈内容
- * @param unsatisfactoryReason 不满意原因
- * @param source 来源
- * @param existingTags 已有标签
- * @param confidenceThreshold 置信度阈值
- * @returns 打标结果
  */
 export async function analyzeFeedback(
   content: string,
   unsatisfactoryReason: string,
   source: string,
-  existingTags: any[],
+  existingTags: TagRecord[],
   confidenceThreshold: number
 ): Promise<AITagResult> {
   const tag1List = existingTags.filter(t => t.tag1Name).map(t => t.tag1Name);
   const tag2List = existingTags.filter(t => t.tag2Name).map(t => t.tag2Name);
   const tag3List = existingTags.filter(t => t.tag3Name).map(t => t.tag3Name);
 
-  const prompt = generateTaggingPrompt(content, unsatisfactoryReason, source, tag1List, tag2List, tag3List, confidenceThreshold);
+  const prompt = generateBatchTaggingPrompt(
+    [{ id: '0', content, score: 0, source, unsatisfactoryReason }],
+    tag1List, tag2List, tag3List, confidenceThreshold
+  );
 
-  const result = await chatCompletionJSON<{
+  const result = await chatCompletionJSON<Array<{
     tag1: string[];
     tag2: string[];
     tag3: string[];
     confidence: number;
     needLogCheck: boolean;
     translatedContent: string;
-  }>([{ role: 'user' as const, content: prompt }], { temperature: 0.3 });
+  }>>([{ role: 'user', content: prompt }], { temperature: 0.3 });
 
-  return normalizeTagResult(result, confidenceThreshold);
+  // result 是数组，取第一条
+  const raw = result?.[0] || {};
+  return normalizeTagResult(raw, confidenceThreshold);
+}
+
+// ============================================
+// 批量反馈打标
+// ============================================
+
+/**
+ * 批量对一组反馈进行AI打标
+ * @param batch 反馈数组（每条含 record_id, content, score, source, unsatReason）
+ * @param existingTags 已有标签（用于 prompt 注入）
+ * @param confidenceThreshold 置信度阈值
+ * @returns 打标结果数组，与 batch 一一对应
+ */
+export async function batchAnalyzeFeedbacks(
+  batch: Array<{
+    record_id: string;
+    content: string;
+    score: number;
+    source: string;
+    unsatReason: string;
+  }>,
+  existingTags: TagRecord[],
+  confidenceThreshold: number = 0.8
+): Promise<Array<{ success: boolean; result?: AITagResult; recordId: string }>> {
+  const tag1List = existingTags.filter(t => t.tag1Name).map(t => t.tag1Name);
+  const tag2List = existingTags.filter(t => t.tag2Name).map(t => t.tag2Name);
+  const tag3List = existingTags.filter(t => t.tag3Name).map(t => t.tag3Name);
+
+  const inputs = batch
+    .filter(f => f.content)
+    .map((fb, idx) => ({
+      id: String(idx),
+      content: fb.content,
+      score: fb.score,
+      source: fb.source,
+      unsatisfactoryReason: fb.unsatReason,
+    }));
+
+  if (inputs.length === 0) {
+    return batch.map(fb => ({ success: false, recordId: fb.record_id }));
+  }
+
+  const prompt = generateBatchTaggingPrompt(inputs, tag1List, tag2List, tag3List, confidenceThreshold);
+
+  try {
+    const result = await chatCompletionJSON<Array<{
+      tag1: string[];
+      tag2: string[];
+      tag3: string[];
+      confidence: number;
+      needLogCheck: boolean;
+      translatedContent: string;
+    }>>([{ role: 'user', content: prompt }], { temperature: 0.3 });
+
+    return batch.map((fb, idx) => {
+      const raw = inputs[idx] ? result?.[idx] : {};
+      const normalized = normalizeTagResult(raw || { tag1: [] as string[], tag2: [] as string[], tag3: [] as string[], confidence: 0, needLogCheck: false, translatedContent: '' } as any, confidenceThreshold);
+      return { success: true, result: normalized, recordId: fb.record_id };
+    });
+  } catch (error) {
+    console.error('[Tagger] 批量打标失败:', error);
+    return batch.map(fb => ({ success: false, recordId: fb.record_id }));
+  }
 }
 
 // ============================================
@@ -52,15 +167,6 @@ export async function analyzeFeedback(
 
 /**
  * 完整打标流程：AI分析 → 标签查找/创建 → 写入反馈记录
- * @param feedbackId 反馈ID
- * @param content 反馈内容
- * @param score 评分
- * @param module 模块
- * @param unsatisfactoryReason 不满意原因
- * @param source 来源
- * @param recordId 飞书记录ID
- * @param confidenceThreshold 置信度阈值
- * @returns 打标结果
  */
 export async function completeTaggingProcess(
   feedbackId: string,
@@ -76,7 +182,7 @@ export async function completeTaggingProcess(
     console.log(`[Tagger] 开始处理反馈: ${feedbackId}`);
 
     // 1. 获取已有标签
-    const existingTags = await getAllTags();
+    const existingTags = await getCachedTags();
 
     // 2. AI打标
     console.log(`[Tagger] 步骤1: AI分析反馈内容`);
@@ -130,7 +236,7 @@ async function ensureTagExists(
   level: 'tag1' | 'tag2' | 'tag3'
 ): Promise<void> {
   const existing = await getAllTags();
-  const table = TABLE_NAMES.TAG1; // 统一写入标签体系表
+  const table = TABLE_NAMES.TAG1;
 
   if (level === 'tag1') {
     const found = existing.find(t => t.tag1Name === tag1Name);
@@ -199,29 +305,6 @@ export async function getAllTags(): Promise<TagRecord[]> {
 }
 
 // ============================================
-// 类型定义
-// ============================================
-
-export interface AITagResult {
-  tag1: string[];
-  tag2: string[];
-  tag3: string[];
-  confidence: number;
-  needLogCheck: boolean;
-  reviewNeeded: boolean;
-  translatedContent: string;
-}
-
-export interface TagRecord {
-  tagId: string;
-  tag1Name: string;
-  tag2Name: string;
-  tag3Name: string;
-  usageCount: number;
-  recordId: string;
-}
-
-// ============================================
 // 工具函数
 // ============================================
 
@@ -252,6 +335,9 @@ function normalizeTagResult(
 
 export const tagger = {
   analyzeFeedback,
+  batchAnalyzeFeedbacks,
   completeTaggingProcess,
   getAllTags,
+  getCachedTags,
+  invalidateTagCache,
 };
