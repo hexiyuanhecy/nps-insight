@@ -203,6 +203,12 @@ async function executeCommand(cmd: BotCommand): Promise<void> {
     case 'help':
       await handleHelp(cmd);
       break;
+    case 'status':
+      await handleStatus(cmd);
+      break;
+    case 'tag':
+      await handleTag(cmd);
+      break;
     case 'report':
       await handleReport(cmd);
       break;
@@ -363,4 +369,78 @@ async function handleConfig(cmd: BotCommand): Promise<void> {
     cmd.chatId,
     '系统配置请在管理后台查看和修改。\n访问地址: ' + (process.env.VERCEL_URL || 'localhost:3000') + '/admin'
   );
+}
+
+/**
+ * 状态命令 - 查看当前配置状态和上次执行时间
+ */
+async function handleStatus(cmd: BotCommand): Promise<void> {
+  try {
+    const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
+      pageSize: 500,
+    });
+
+    const total = records.length;
+    const tagged = records.filter((r) => String(r.fields[FEEDBACK_FIELDS.STATUS]) === '已打标').length;
+    const reviewNeeded = records.filter((r) => {
+      const val = r.fields[FEEDBACK_FIELDS.REVIEW_NEEDED];
+      return val === true || String(val).toLowerCase() === 'true';
+    }).length;
+    const needLogCheck = records.filter((r) => {
+      const val = r.fields[FEEDBACK_FIELDS.NEED_LOG_CHECK];
+      return val === true || String(val).toLowerCase() === 'true';
+    }).length;
+
+    const avgScore = total > 0
+      ? (records.reduce((sum, r) => sum + Number(r.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0), 0) / total).toFixed(2)
+      : '-';
+
+    await feishuBot.sendTextMessage(
+      cmd.chatId,
+      `📊 **NPS Insight 状态**\n\n` +
+      `总反馈数: ${total}\n` +
+      `已打标: ${tagged}\n` +
+      `待审核: ${reviewNeeded}\n` +
+      `需查日志: ${needLogCheck}\n` +
+      `平均分: ${avgScore}\n\n` +
+      `配置管理: ${process.env.VERCEL_URL || 'localhost:3000'}/admin`
+    );
+  } catch (error) {
+    console.error('[Webhook] 获取状态失败', error);
+    await feishuBot.sendTextMessage(cmd.chatId, '获取状态失败，请稍后重试');
+  }
+}
+
+/**
+ * 打标命令 - 手动触发打标流程
+ */
+async function handleTag(cmd: BotCommand): Promise<void> {
+  try {
+    // 调用周度 cron 任务触发打标
+    const cronUrl = `${process.env.VERCEL_URL || 'http://localhost:3000'}/api/cron/sync`;
+
+    const response = await fetch(cronUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // 如果有 CRON_SECRET 则带上授权
+      ...(process.env.CRON_SECRET ? {
+        headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
+      } : {}),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    await feishuBot.sendTextMessage(
+      cmd.chatId,
+      '✅ 打标任务已触发，请稍后查看通知群消息。'
+    );
+  } catch (error) {
+    console.error('[Webhook] 触发打标失败', error);
+    await feishuBot.sendTextMessage(
+      cmd.chatId,
+      `触发打标失败: ${error instanceof Error ? error.message : '未知错误'}`
+    );
+  }
 }
