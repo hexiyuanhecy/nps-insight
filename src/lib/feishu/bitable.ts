@@ -30,8 +30,12 @@ function getTableIdMapping(): Record<string, string> {
   return {
     feedback: process.env.BITABLE_TABLE_ID || '',
     tags: process.env.BITABLE_TABLE_ID_TAGS || '',
+    tag1: process.env.BITABLE_TABLE_ID_TAGS || '',
+    tag2: process.env.BITABLE_TABLE_ID_TAGS || '',
+    tag3: process.env.BITABLE_TABLE_ID_TAGS || '',
     tenants: process.env.BITABLE_TABLE_ID_TENANTS || '',
     analysis: process.env.BITABLE_TABLE_ID_ANALYSIS || '',
+    top_issues: process.env.BITABLE_TABLE_ID_ANALYSIS || '',
     config: process.env.BITABLE_TABLE_ID_CONFIG || '',
   };
 }
@@ -135,6 +139,11 @@ export async function batchCreateRecords(
         body: JSON.stringify({ records: batch }),
       });
 
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`批量创建记录 HTTP ${response.status}: ${text.substring(0, 500)}`);
+      }
+
       const data = await response.json();
       if (data.code !== 0) {
         throw new Error(`批量创建记录失败: ${data.msg}`);
@@ -205,6 +214,11 @@ export async function batchUpdateRecords(
         headers,
         body: JSON.stringify({ records: batch }),
       });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`批量更新记录 HTTP ${response.status}: ${text.substring(0, 500)}`);
+      }
 
       const data = await response.json();
       if (data.code !== 0) {

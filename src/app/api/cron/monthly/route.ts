@@ -38,6 +38,9 @@ export async function GET(request: NextRequest): Promise<NextResponse<MonthlyTas
  * POST /api/cron/monthly
  * 手动触发月度任务
  */
+// Increase timeout for monthly task
+export const maxDuration = 120;
+
 export async function POST(request: NextRequest): Promise<NextResponse<MonthlyTaskResult>> {
   // 验证授权
   const authHeader = request.headers.get('authorization');
@@ -56,7 +59,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<MonthlyTa
 
 async function handleMonthlyTask(): Promise<NextResponse<MonthlyTaskResult>> {
   console.log('[月度任务] 开始执行');
-  
+
   const result: MonthlyTaskResult = {
     success: false,
     timestamp: Date.now(),
@@ -66,39 +69,81 @@ async function handleMonthlyTask(): Promise<NextResponse<MonthlyTaskResult>> {
     meetingDoc: null,
     notification: false,
   };
-  
+
+  // DEV_MODE: 跳过所有飞书 API 调用，直接返回模拟结果
+  if (process.env.CRON_DEV_MODE === 'true') {
+    console.log('[月度任务 DEV] 开发模式：使用模拟数据');
+    const now = new Date();
+    const periodName = `${now.getFullYear()}年${now.getMonth() + 1}月`;
+
+    result.evolution = {
+      timestamp: Date.now(),
+      duplicates: [],
+      splittables: [],
+      coldTags: [],
+      hotTags: [],
+      actions: [],
+    };
+    result.topIssues = [];
+    result.formulaSync = true;
+    result.meetingDoc = { documentId: 'mock_doc', url: process.env.FEISHU_BITABLE_URL || '' };
+    result.notification = true;
+    result.success = true;
+
+    console.log(`[月度任务 DEV] 完成 (${periodName})`);
+    return NextResponse.json(result);
+  }
+
   try {
     const storage = getDefaultStorage();
     const notification = getDefaultNotification();
     const document = getDefaultDocument();
-    
+
     // 1. 标签自进化（先执行）
     console.log('[月度任务] 步骤1：标签自进化');
-    const tagEvolution = new TagEvolution(storage);
-    result.evolution = await tagEvolution.execute();
-    
+    try {
+      const tagEvolution = new TagEvolution(storage);
+      result.evolution = await tagEvolution.execute();
+    } catch (evoErr) {
+      console.error('[月度任务] 标签自进化失败，跳过:', evoErr);
+      result.evolution = { duplicates: [], splittables: [], coldTags: [], hotTags: [], actions: [], timestamp: Date.now() };
+    }
+
     // 2. Top问题生成（基于历史+本月数据）
     console.log('[月度任务] 步骤2：Top问题生成');
-    const topIssuesGenerator = new TopIssuesGenerator(storage);
-    
-    // 获取当前权重配置
-    const formulaSync = new FormulaSync(storage);
-    const weights = await formulaSync.getWeights();
-    topIssuesGenerator.setWeights(weights);
-    
-    result.topIssues = await topIssuesGenerator.generate();
-    
-    // 写入 Top问题表
-    await topIssuesGenerator.writeToTable(result.topIssues);
-    
+    try {
+      const topIssuesGenerator = new TopIssuesGenerator(storage);
+
+      // 获取当前权重配置
+      const formulaSync = new FormulaSync(storage);
+      const weights = await formulaSync.getWeights();
+      topIssuesGenerator.setWeights(weights);
+
+      result.topIssues = await topIssuesGenerator.generate();
+
+      // 写入 Top问题表
+      await topIssuesGenerator.writeToTable(result.topIssues);
+    } catch (topErr) {
+      console.error('[月度任务] Top问题生成失败，跳过:', topErr);
+    }
+
     // 3. 公式同步（以用户调整为准）
     console.log('[月度任务] 步骤3：公式同步');
-    await formulaSync.sync();
-    result.formulaSync = true;
-    
+    try {
+      const formulaSync = new FormulaSync(storage);
+      await formulaSync.sync();
+      result.formulaSync = true;
+    } catch (fmtErr) {
+      console.error('[月度任务] 公式同步失败:', fmtErr);
+    }
+
     // 4. 生成会议文档
     console.log('[月度任务] 步骤4：生成会议文档');
-    result.meetingDoc = await generateMeetingDoc(document, result.evolution, result.topIssues);
+    try {
+      result.meetingDoc = await generateMeetingDoc(document, result.evolution, result.topIssues || []);
+    } catch (docErr) {
+      console.error('[月度任务] 会议文档生成失败:', docErr);
+    }
     
     // 5. 发送通知
     console.log('[月度任务] 步骤5：发送通知');
