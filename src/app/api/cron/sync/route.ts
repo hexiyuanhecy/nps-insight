@@ -2,6 +2,10 @@
  * 定时同步任务API
  * GET /api/cron/sync
  * 由Vercel Cron触发，执行数据同步、AI打标、通知发送
+ *
+ * 多用户支持：
+ * - 遍历所有 KV 中的配置，为每个用户执行同步任务
+ * - 若无 KV 配置，回退到环境变量配置（向后兼容）
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,6 +16,7 @@ import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
 import { feishuBot, createWeeklyReportCard } from '@/lib/feishu/bot';
 import { tagger } from '@/lib/ai/tagger';
 import { SyncResult } from '@/lib/types';
+import { listAllConfigKeys, getConfig } from '@/lib/storage/kv-storage';
 
 // ============================================
 // Cron任务处理
@@ -101,13 +106,61 @@ export async function POST(request: NextRequest) {
 // ============================================
 
 /**
- * 执行完整的同步任务
- * 1. 拉取外部数据（多数据源适配器）
- * 2. 对未打标的反馈进行AI打标（多模型LLM）
- * 3. 生成周期报告
- * 4. 发送通知到群
+ * 执行完整的同步任务（多用户版本）
+ * 遍历所有用户配置，为每个用户执行同步
  */
 async function runSyncTask(): Promise<SyncResult> {
+  const details: string[] = [];
+  let syncedCount = 0;
+  let failedCount = 0;
+
+  // 多用户支持：尝试从 KV 获取所有配置
+  try {
+    const configKeys = await listAllConfigKeys();
+    
+    if (configKeys.length > 0) {
+      console.log(`[Cron] 发现 ${configKeys.length} 个用户配置，开始多用户同步`);
+      
+      // 遍历每个用户的配置执行同步
+      for (const key of configKeys) {
+        const ownerId = key.replace('config:', '');
+        console.log(`[Cron] 正在同步用户: ${ownerId}`);
+        
+        try {
+          const userConfig = await getConfig(ownerId);
+          if (userConfig) {
+            // 为每个用户执行同步（当前实现仍使用全局环境变量，未来需改进）
+            const result = await runSyncTaskForUser(ownerId);
+            syncedCount += result.syncedCount;
+            failedCount += result.failedCount;
+            details.push(`[${ownerId}] 同步了 ${result.syncedCount} 条反馈`);
+          }
+        } catch (userErr) {
+          console.error(`[Cron] 用户 ${ownerId} 同步失败:`, userErr);
+          details.push(`[${ownerId}] 同步失败: ${userErr instanceof Error ? userErr.message : '未知错误'}`);
+        }
+      }
+      
+      return {
+        success: true,
+        syncedCount,
+        failedCount,
+        details,
+        executedAt: new Date().toISOString(),
+      };
+    }
+  } catch (kvErr) {
+    console.warn('[Cron] KV 查询失败，回退到环境变量模式:', kvErr);
+  }
+
+  // 回退到单用户模式（使用环境变量）
+  return runSyncTaskSingleUser();
+}
+
+/**
+ * 单用户同步（使用环境变量，向后兼容）
+ */
+async function runSyncTaskSingleUser(): Promise<SyncResult> {
   const details: string[] = [];
   let syncedCount = 0;
   let failedCount = 0;
@@ -180,6 +233,55 @@ async function runSyncTask(): Promise<SyncResult> {
       syncedCount,
       failedCount,
       details,
+      executedAt: new Date().toISOString(),
+    };
+  }
+}
+
+/**
+ * 为单个用户执行同步任务（未来扩展用）
+ * 目前内部仍使用全局环境变量，需要后续改进
+ */
+async function runSyncTaskForUser(ownerId: string): Promise<SyncResult> {
+  const details: string[] = [];
+  let syncedCount = 0;
+  let failedCount = 0;
+
+  try {
+    if (process.env.CRON_DEV_MODE === 'true') {
+      const mockResult = await runSyncWithMockData();
+      return { ...mockResult, details };
+    }
+
+    // TODO: 使用 ownerId 对应的用户配置执行同步
+    // 目前暂时复用单用户逻辑，未来需要重构为用户隔离模式
+
+    const externalDataResult = await syncExternalData();
+    if (externalDataResult > 0) {
+      syncedCount += externalDataResult;
+    }
+
+    const tagResult = await autoTagFeedbacks(50);
+    if (tagResult > 0) {
+      syncedCount += tagResult;
+    }
+
+    await generateDailyReport();
+    await sendNotification(syncedCount);
+
+    return {
+      success: true,
+      syncedCount,
+      failedCount,
+      details,
+      executedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      success: false,
+      syncedCount,
+      failedCount,
+      details: [error instanceof Error ? error.message : '未知错误'],
       executedAt: new Date().toISOString(),
     };
   }
@@ -626,8 +728,34 @@ async function runSyncWithMockData(): Promise<SyncResult> {
     // Mock: 生成报告
     details.push('[Mock] 报告生成成功');
 
-    // Mock: 发送通知
-    details.push('[Mock] 通知发送成功');
+    // Mock: 发送通知（真实发送到飞书）
+    try {
+      const chatId = process.env.NOTIFICATION_CHAT_ID;
+      if (chatId) {
+        const now = new Date();
+        const weekNum = `第${getISOWeek(now)}周`;
+        await feishuBot.sendCardMessage(
+          chatId,
+          createWeeklyReportCard({
+            weekNumber: `${now.getFullYear()}年${weekNum}`,
+            totalFeedbacks: syncedCount,
+            reviewCount: 0,
+            topIssues: [],
+            scoreDistribution: [{ score: '1', pct: 20 }, { score: '2-3', pct: 50 }, { score: '4-5', pct: 30 }],
+            bitableUrl: process.env.FEISHU_BITABLE_URL || '',
+            logPlatformUrl: process.env.LOG_PLATFORM_URL || '',
+            hasNeedLogCheck: false,
+            hasReviewNeeded: false,
+          })
+        );
+        details.push(`[Mock] 通知已发送到飞书（${syncedCount} 条反馈）`);
+      } else {
+        details.push('[Mock] 通知跳过（未配置 NOTIFICATION_CHAT_ID）');
+      }
+    } catch (notifyErr) {
+      console.error('[Cron DEV] 通知发送失败:', notifyErr);
+      details.push(`[Mock] 通知发送失败: ${notifyErr instanceof Error ? notifyErr.message : '未知错误'}`);
+    }
 
     return {
       success: true,
