@@ -106,6 +106,9 @@ export async function createNPSInsightBitable(
     createPeriodAnalysisTable(token, appToken),
   ]);
 
+  // 4. 为标签表添加公式字段（需在所有表创建完成后执行）
+  await addTagTableFormulas(token, appToken, feedbackTableId);
+
   return {
     appToken,
     tables: {
@@ -117,6 +120,165 @@ export async function createNPSInsightBitable(
       periodTableId,
     },
   };
+}
+
+/**
+ * 为标签表添加公式字段
+ * 公式字段依赖反馈表的关联字段，因此必须在所有表创建完成后添加
+ */
+async function addTagTableFormulas(
+  token: string,
+  appToken: string,
+  feedbackTableId: string
+): Promise<void> {
+  // 获取反馈表的字段列表，找到 tag1/tag2/tag3 关联字段的 field_id
+  const feedbackFieldsResponse = await fetch(
+    `${BITABLE_API_BASE}/apps/${appToken}/tables/${feedbackTableId}/fields`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+  const feedbackFieldsData = await feedbackFieldsResponse.json();
+  if (feedbackFieldsData.code !== 0) {
+    console.warn(`[公式] 获取反馈表字段失败，跳过公式配置: ${feedbackFieldsData.msg}`);
+    return;
+  }
+
+  const fieldMap: Record<string, string> = {};
+  for (const item of feedbackFieldsData.data?.items || []) {
+    const name = item.field_name || '';
+    if (name === 'tag1') fieldMap.tag1 = item.field_id || '';
+    else if (name === 'tag2') fieldMap.tag2 = item.field_id || '';
+    else if (name === 'tag3') fieldMap.tag3 = item.field_id || '';
+  }
+
+  // 公式字段类型: 15
+  const FORMULA_TYPE = 15;
+
+  // 为 Tag1 表添加公式字段
+  await addFormulaField(token, appToken, 'Tag1表', '使用次数', FORMULA_TYPE, {
+    formula: `COUNTA(关联(反馈列表.${fieldMap.tag1 || 'tag1'}))`,
+  });
+  await addFormulaField(token, appToken, 'Tag1表', '大租户数', FORMULA_TYPE, {
+    formula: `COUNTA(FILTER(关联(反馈列表.${fieldMap.tag1 || 'tag1'}), 反馈列表.租户规模 IN ["A4", "A5", "A6"]))`,
+  });
+  await addFormulaField(token, appToken, 'Tag1表', '大租户占比', FORMULA_TYPE, {
+    formula: `IF(使用次数 > 0, 大租户数 / 使用次数, 0)`,
+  });
+  await addFormulaField(token, appToken, 'Tag1表', '平均分', FORMULA_TYPE, {
+    formula: `AVERAGE(关联(反馈列表.${fieldMap.tag1 || 'tag1'}).评分)`,
+  });
+
+  // 为 Tag2 表添加公式字段
+  await addFormulaField(token, appToken, 'Tag2表', '使用次数', FORMULA_TYPE, {
+    formula: `COUNTA(关联(反馈列表.${fieldMap.tag2 || 'tag2'}))`,
+  });
+  await addFormulaField(token, appToken, 'Tag2表', '大租户数', FORMULA_TYPE, {
+    formula: `COUNTA(FILTER(关联(反馈列表.${fieldMap.tag2 || 'tag2'}), 反馈列表.租户规模 IN ["A4", "A5", "A6"]))`,
+  });
+  await addFormulaField(token, appToken, 'Tag2表', '大租户占比', FORMULA_TYPE, {
+    formula: `IF(使用次数 > 0, 大租户数 / 使用次数, 0)`,
+  });
+  await addFormulaField(token, appToken, 'Tag2表', '平均分', FORMULA_TYPE, {
+    formula: `AVERAGE(关联(反馈列表.${fieldMap.tag2 || 'tag2'}).评分)`,
+  });
+  await addFormulaField(token, appToken, 'Tag2表', 'Tag3数量', FORMULA_TYPE, {
+    formula: `COUNTA(关联(Tag3表.所属二级标签))`,
+  });
+
+  // 为 Tag3 表添加公式字段
+  await addFormulaField(token, appToken, 'Tag3表', '使用次数', FORMULA_TYPE, {
+    formula: `COUNTA(关联(反馈列表.${fieldMap.tag3 || 'tag3'}))`,
+  });
+  await addFormulaField(token, appToken, 'Tag3表', '大租户数', FORMULA_TYPE, {
+    formula: `COUNTA(FILTER(关联(反馈列表.${fieldMap.tag3 || 'tag3'}), 反馈列表.租户规模 IN ["A4", "A5", "A6"]))`,
+  });
+  await addFormulaField(token, appToken, 'Tag3表', '大租户占比', FORMULA_TYPE, {
+    formula: `IF(使用次数 > 0, 大租户数 / 使用次数, 0)`,
+  });
+  await addFormulaField(token, appToken, 'Tag3表', '平均分', FORMULA_TYPE, {
+    formula: `AVERAGE(关联(反馈列表.${fieldMap.tag3 || 'tag3'}).评分)`,
+  });
+
+  console.log('[公式] 标签表公式字段配置完成');
+}
+
+/**
+ * 为指定表添加公式字段
+ */
+async function addFormulaField(
+  token: string,
+  appToken: string,
+  tableName: string,
+  fieldName: string,
+  fieldType: number,
+  property: Record<string, unknown>
+): Promise<void> {
+  // 先获取表 ID
+  const tablesResponse = await fetch(
+    `${BITABLE_API_BASE}/apps/${appToken}/tables`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+  const tablesData = await tablesResponse.json();
+  let tableId = '';
+  for (const item of tablesData.data?.items || []) {
+    if (item.name === tableName) {
+      tableId = item.table_id;
+      break;
+    }
+  }
+  if (!tableId) {
+    console.warn(`[公式] 未找到表: ${tableName}`);
+    return;
+  }
+
+  // 检查字段是否已存在
+  const fieldsResponse = await fetch(
+    `${BITABLE_API_BASE}/apps/${appToken}/tables/${tableId}/fields`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+  const fieldsData = await fieldsResponse.json();
+  for (const item of fieldsData.data?.items || []) {
+    if (item.field_name === fieldName) {
+      console.log(`[公式] 字段已存在，跳过: ${tableName}.${fieldName}`);
+      return;
+    }
+  }
+
+  // 添加公式字段
+  const response = await fetch(
+    `${BITABLE_API_BASE}/apps/${appToken}/tables/${tableId}/fields`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ field_name: fieldName, type: fieldType, property }),
+    }
+  );
+  const data = await response.json();
+  if (data.code !== 0) {
+    console.warn(`[公式] 添加字段失败 [${tableName}.${fieldName}]: ${data.msg}`);
+  } else {
+    console.log(`[公式] 添加公式字段成功: ${tableName}.${fieldName}`);
+  }
 }
 
 /**
