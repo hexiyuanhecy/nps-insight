@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getAllTags,
+  getCachedTags,
 } from '@/lib/ai/tagger';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS } from '@/lib/feishu/constants';
@@ -36,19 +37,18 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
     const level = searchParams.get('level') as TagLevel | null;
 
-    // 使用 getAllTags 并按层级过滤
     const allTags = await getAllTags();
 
     if (level === 'tag1') {
-      const tags = allTags.filter(t => t.table === 'tag1');
+      const tags = allTags.filter(t => t.tag1Name && !t.tag2Name && !t.tag3Name);
       return NextResponse.json({ success: true, data: paginate<Tag>(tags as Tag[], page, pageSize) });
     }
     if (level === 'tag2') {
-      const tags = allTags.filter(t => t.table === 'tag2');
+      const tags = allTags.filter(t => t.tag2Name && !t.tag3Name);
       return NextResponse.json({ success: true, data: paginate<Tag>(tags as Tag[], page, pageSize) });
     }
     if (level === 'tag3') {
-      const tags = allTags.filter(t => t.table === 'tag3');
+      const tags = allTags.filter(t => t.tag3Name);
       return NextResponse.json({ success: true, data: paginate<Tag>(tags as Tag[], page, pageSize) });
     }
 
@@ -81,17 +81,9 @@ export async function POST(request: NextRequest) {
       createdBy?: string;
     };
 
-    if (tag1Name && tag2Name && tag3Name) {
-      const recordId = await findOrCreateTag(tag1Name, tag2Name, tag3Name, createdBy);
-      return NextResponse.json({
-        success: true,
-        data: { recordId, message: '标签创建成功' },
-      });
-    }
-
     if (!level || !name) {
       return NextResponse.json(
-        { success: false, error: '缺少必要参数：level + name，或 tag1Name/tag2Name/tag3Name' },
+        { success: false, error: '缺少必要参数：level + name' },
         { status: 400 },
       );
     }
@@ -104,17 +96,22 @@ export async function POST(request: NextRequest) {
     const { table, fields } = tableMap[level];
     const tagId = `${level}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    const record = await bitableClient.createRecord(table, {
+    const createFields: Record<string, unknown> = {
       [fields.TAG_ID]: tagId,
       [fields.NAME]: name,
-      [fields.DEFINITION]: definition || '',
       [fields.USAGE_COUNT]: 0,
       [fields.LARGE_TENANT_COUNT]: 0,
       [fields.LARGE_TENANT_RATIO]: 0,
-      [fields.STATUS]: TagStatus.ACTIVE,
-      [fields.CREATED_BY]: createdBy,
-      [fields.CREATED_AT]: Date.now(),
-    });
+    };
+
+    if (level === 'tag1') {
+      createFields[(fields as typeof TAG1_FIELDS).DEFINITION] = definition || '';
+      createFields[(fields as typeof TAG1_FIELDS).STATUS] = TagStatus.ACTIVE;
+      createFields[(fields as typeof TAG1_FIELDS).CREATED_BY] = createdBy;
+      createFields[(fields as typeof TAG1_FIELDS).CREATED_AT] = Date.now();
+    }
+
+    const record = await bitableClient.createRecord(table, createFields);
 
     return NextResponse.json({
       success: true,
@@ -154,8 +151,10 @@ export async function PUT(request: NextRequest) {
 
     const updateFields: Record<string, unknown> = {};
     if (name !== undefined) updateFields[fields.NAME] = name;
-    if (definition !== undefined) updateFields[fields.DEFINITION] = definition;
-    if (status !== undefined) updateFields[fields.STATUS] = status;
+    if (level === 'tag1') {
+      if (definition !== undefined) updateFields[(fields as typeof TAG1_FIELDS).DEFINITION] = definition;
+      if (status !== undefined) updateFields[(fields as typeof TAG1_FIELDS).STATUS] = status;
+    }
 
     const record = await bitableClient.updateRecord(table, recordId, updateFields);
     return NextResponse.json({

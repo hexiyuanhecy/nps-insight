@@ -259,7 +259,7 @@ function filterFeedbacks(
       params.keywords!.some(
         (kw) =>
           f.content.toLowerCase().includes(kw.toLowerCase()) ||
-          f.module.toLowerCase().includes(kw.toLowerCase()) ||
+          (f.module && f.module.toLowerCase().includes(kw.toLowerCase())) ||
           f.tag1?.toLowerCase().includes(kw.toLowerCase())
       )
     );

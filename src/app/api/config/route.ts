@@ -53,12 +53,24 @@ function buildV3Config(): any {
     mode: (process.env.BITABLE_MODE as 'create' | 'link') || 'link',
     appToken: process.env.BITABLE_TOKEN || '',
     url: process.env.BITABLE_URL || '',
-    feedbackTableId: process.env.BITABLE_FEEDBACK_TABLE_ID || '',
-    tagsTableId: process.env.BITABLE_TAGS_TABLE_ID || '',
-    tenantsTableId: process.env.BITABLE_TENANTS_TABLE_ID || '',
-    analysisTableId: process.env.BITABLE_ANALYSIS_TABLE_ID || '',
-    status: process.env.BITABLE_TOKEN ? 'linked' : 'unset',
-  };
+    feedbackTableId:
+      process.env.BITABLE_FEEDBACK_TABLE_ID ||
+      process.env.BITABLE_TABLE_ID ||
+      '',
+    tagsTableId:
+      process.env.BITABLE_TAGS_TABLE_ID ||
+      process.env.BITABLE_TABLE_ID_TAGS ||
+      '',
+    tenantsTableId:
+      process.env.BITABLE_TENANTS_TABLE_ID ||
+      process.env.BITABLE_TABLE_ID_TENANTS ||
+      '',
+    analysisTableId:
+      process.env.BITABLE_ANALYSIS_TABLE_ID ||
+      process.env.BITABLE_TABLE_ID_ANALYSIS ||
+      '',
+    status: process.env.BITABLE_TOKEN ? 'linked' : 'unset'
+  }
 
   // 3. 数据源
   const dataSource = {
@@ -476,14 +488,21 @@ async function saveConfigV3(config: any) {
 // ============================================
 
 async function testFeishu(feishuConfig: any) {
-  const appId = feishuConfig.appId || process.env.FEISHU_APP_ID;
-  const appSecret = feishuConfig.appSecret || process.env.FEISHU_APP_SECRET;
+  // 将 __SET__ 占位符视为未填写，回退到环境变量
+  const appId =
+    feishuConfig.appId && feishuConfig.appId !== '__SET__'
+      ? feishuConfig.appId
+      : process.env.FEISHU_APP_ID
+  const appSecret =
+    feishuConfig.appSecret && feishuConfig.appSecret !== '__SET__'
+      ? feishuConfig.appSecret
+      : process.env.FEISHU_APP_SECRET
 
   if (!appId || !appSecret) {
     return NextResponse.json(
       { success: false, error: '请先填写 App ID 和 App Secret' },
       { status: 400 }
-    );
+    )
   }
 
   try {
@@ -493,25 +512,31 @@ async function testFeishu(feishuConfig: any) {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+        body: JSON.stringify({ app_id: appId, app_secret: appSecret })
       }
-    );
-    const data = await res.json();
+    )
+    const data = await res.json()
     if (data.code === 0 && data.tenant_access_token) {
       return NextResponse.json({
         success: true,
-        message: '飞书应用连接正常（已获取 access_token）',
-      });
+        message: '飞书应用连接正常（已获取 access_token）'
+      })
     }
     return NextResponse.json(
-      { success: false, error: '飞书返回错误: ' + (data.msg || data.error || '未知') },
+      {
+        success: false,
+        error: '飞书返回错误: ' + (data.msg || data.error || '未知')
+      },
       { status: 400 }
-    );
+    )
   } catch (error) {
     return NextResponse.json(
-      { success: false, error: '网络异常: ' + (error instanceof Error ? error.message : '未知') },
+      {
+        success: false,
+        error: '网络异常: ' + (error instanceof Error ? error.message : '未知')
+      },
       { status: 500 }
-    );
+    )
   }
 }
 

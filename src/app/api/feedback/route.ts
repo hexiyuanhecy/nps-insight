@@ -15,7 +15,7 @@ import {
   UpdateFeedbackRequest,
   PaginatedResponse,
 } from '@/lib/types';
-import { analyzeFeedback } from '@/lib/ai/tagger';
+import { analyzeFeedback, getCachedTags } from '@/lib/ai/tagger';
 
 // ============================================
 // GET - 获取反馈列表
@@ -130,12 +130,15 @@ export async function POST(request: NextRequest) {
     if (autoTag) {
       try {
         console.log(`[API] 对反馈 ${feedbackId} 进行AI打标`);
-        const analysisResult = await analyzeFeedback({
+        // 使用完整参数调用 analyzeFeedback
+        const existingTags = await getCachedTags();
+        const analysisResult = await analyzeFeedback(
           content,
-          npsScore,
-        });
-
-        // 查找或创建标签（ensureTagExists 已在 completeTaggingProcess 中调用）
+          '', // unsatisfactoryReason
+          source || 'manual',
+          existingTags,
+          0.8 // confidenceThreshold
+        );
 
         // 更新字段（只写表中存在的字段，字段名严格对应：Tag1/Tag2/Tag3 大写 T）
         fields[FEEDBACK_FIELDS.TAG1] = analysisResult.tag1 || '';

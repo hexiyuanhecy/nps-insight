@@ -400,19 +400,24 @@ export class TagEvolution {
   private toTagRecord(record: BitableRecord, table: 'tag1' | 'tag2' | 'tag3', level: 'Tag1' | 'Tag2' | 'Tag3'): TagRecord {
     const fields = table === 'tag1' ? TAG1_FIELDS : table === 'tag2' ? TAG2_FIELDS : TAG3_FIELDS;
 
+    const baseFields: Record<string, unknown> = {
+      name: String(record.fields[fields.NAME] || ''),
+      level,
+      usageCount: Number(record.fields[fields.USAGE_COUNT] || 0),
+      largeTenantCount: Number(record.fields[fields.LARGE_TENANT_COUNT] || 0),
+      largeTenantRatio: Number(record.fields[fields.LARGE_TENANT_RATIO] || 0),
+    };
+
+    if (table === 'tag1') {
+      baseFields.definition = String(record.fields[(fields as typeof TAG1_FIELDS).DEFINITION] || '');
+      baseFields.status = String(record.fields[(fields as typeof TAG1_FIELDS).STATUS] || 'active');
+      baseFields.createdBy = String(record.fields[(fields as typeof TAG1_FIELDS).CREATED_BY] || 'AI');
+    }
+
     return {
       record_id: record.record_id,
       table,
-      fields: {
-        name: String(record.fields[fields.NAME] || ''),
-        level,
-        definition: String(record.fields[fields.DEFINITION] || ''),
-        status: String(record.fields[fields.STATUS] || 'active'),
-        createdBy: String(record.fields[fields.CREATED_BY] || 'AI'),
-        usageCount: Number(record.fields[fields.USAGE_COUNT] || 0),
-        largeTenantCount: Number(record.fields[fields.LARGE_TENANT_COUNT] || 0),
-        largeTenantRatio: Number(record.fields[fields.LARGE_TENANT_RATIO] || 0),
-      },
+      fields: baseFields as TagRecord['fields'],
     };
   }
 }

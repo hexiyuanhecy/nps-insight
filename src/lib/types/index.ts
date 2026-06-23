@@ -294,6 +294,7 @@ export interface UpdateFeedbackRequest {
   tag3?: string;
   summary?: string;
   suggestions?: string;
+  npsScore?: number;
 }
 
 /** 创建标签请求 */
@@ -435,6 +436,7 @@ export type BitableFieldType =
   | 'URL'            // 链接
   | 'Attachment'     // 附件
   | 'SingleLink'     // 单向关联
+  | 'MultiLink'      // 多选关联
   | 'Lookup'         // 查找引用
   | 'Formula'        // 公式
   | 'DuplexLink'     // 双向关联

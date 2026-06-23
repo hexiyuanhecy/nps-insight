@@ -201,31 +201,34 @@ async function executeCommand(cmd: BotCommand): Promise<void> {
 
   switch (cmd.command) {
     case 'help':
-      await handleHelp(cmd);
-      break;
+      await handleHelp(cmd)
+      break
     case 'status':
-      await handleStatus(cmd);
-      break;
+      await handleStatus(cmd)
+      break
     case 'tag':
-      await handleTag(cmd);
-      break;
+      await handleTag(cmd)
+      break
     case 'report':
-      await handleReport(cmd);
-      break;
+      await handleReport(cmd)
+      break
     case 'analysis':
-      await handleAnalysis(cmd);
-      break;
+      await handleAnalysis(cmd)
+      break
+    case 'analyze':
+      await handleAnalysis(cmd)
+      break
     case 'feedback':
-      await handleFeedback(cmd);
-      break;
+      await handleFeedback(cmd)
+      break
     case 'config':
-      await handleConfig(cmd);
-      break;
+      await handleConfig(cmd)
+      break
     default:
       await feishuBot.sendTextMessage(
         cmd.chatId,
         `未知命令: ${cmd.command}\n输入 "/nps help" 查看可用命令`
-      );
+      )
   }
 }
 
@@ -284,48 +287,6 @@ async function handleReport(cmd: BotCommand): Promise<void> {
 }
 
 /**
- * 分析命令 - 查看指定周期分析
- */
-async function handleAnalysis(cmd: BotCommand): Promise<void> {
-  const periodName = cmd.args[0] || '最近30天';
-
-  try {
-    // 查找已有的分析报告
-    const analysisRecords = await bitableClient.searchRecords(
-      TABLE_NAMES.ANALYSIS,
-      ANALYSIS_FIELDS.PERIOD_NAME,
-      periodName
-    );
-
-    if (analysisRecords.length > 0) {
-      const analysis = analysisRecords[0];
-      const topIssues = JSON.parse(String(analysis.fields[ANALYSIS_FIELDS.TOP_ISSUES] || '[]'));
-
-      await feishuBot.sendCardMessage(
-        cmd.chatId,
-        createAnalysisCard({
-          periodName: String(analysis.fields[ANALYSIS_FIELDS.PERIOD_NAME]),
-          totalFeedbacks: Number(analysis.fields[ANALYSIS_FIELDS.TOTAL_FEEDBACKS]),
-          npsScore: Number(analysis.fields[ANALYSIS_FIELDS.NPS_SCORE]),
-          topIssues,
-          promoterCount: 0, // 可以从详细数据计算
-          passiveCount: 0,
-          detractorCount: 0,
-        })
-      );
-    } else {
-      await feishuBot.sendTextMessage(
-        cmd.chatId,
-        `未找到 "${periodName}" 的分析报告。\n请先在管理后台生成报告，或使用 "/nps report" 查看最新概况。`
-      );
-    }
-  } catch (error) {
-    console.error('[Webhook] 获取分析失败', error);
-    await feishuBot.sendTextMessage(cmd.chatId, '获取分析失败，请稍后重试');
-  }
-}
-
-/**
  * 反馈命令 - 查看最新反馈
  */
 async function handleFeedback(cmd: BotCommand): Promise<void> {
@@ -344,14 +305,18 @@ async function handleFeedback(cmd: BotCommand): Promise<void> {
     // 发送最新反馈卡片
     for (const record of records.slice(0, limit)) {
       const feedback = {
-        userName: String(record.fields[FEEDBACK_FIELDS.USER_NAME] || '匿名用户'),
-        module: String(record.fields[FEEDBACK_FIELDS.MODULE] || '未分类'),
+        userName: String(
+          record.fields[FEEDBACK_FIELDS.USER_NAME] || '匿名用户'
+        ),
+        module: String(
+          record.fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] || '未分类'
+        ),
         npsScore: Number(record.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0),
         content: String(record.fields[FEEDBACK_FIELDS.CONTENT] || ''),
         tag1: String(record.fields[FEEDBACK_FIELDS.TAG1] || ''),
         tag2: String(record.fields[FEEDBACK_FIELDS.TAG2] || ''),
-        tag3: String(record.fields[FEEDBACK_FIELDS.TAG3] || ''),
-      };
+        tag3: String(record.fields[FEEDBACK_FIELDS.TAG3] || '')
+      }
 
       await feishuBot.sendCardMessage(cmd.chatId, createFeedbackCard(feedback));
     }
@@ -417,16 +382,22 @@ async function handleStatus(cmd: BotCommand): Promise<void> {
 async function handleTag(cmd: BotCommand): Promise<void> {
   try {
     // 调用周度 cron 任务触发打标
-    const cronUrl = `${process.env.VERCEL_URL || 'http://localhost:3000'}/api/cron/sync`;
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3000'
+    const cronUrl = `${baseUrl}/api/cron/sync`
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    }
+    if (process.env.CRON_SECRET) {
+      headers['Authorization'] = `Bearer ${process.env.CRON_SECRET}`
+    }
 
     const response = await fetch(cronUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // 如果有 CRON_SECRET 则带上授权
-      ...(process.env.CRON_SECRET ? {
-        headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
-      } : {}),
-    });
+      headers
+    })
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -441,6 +412,104 @@ async function handleTag(cmd: BotCommand): Promise<void> {
     await feishuBot.sendTextMessage(
       cmd.chatId,
       `触发打标失败: ${error instanceof Error ? error.message : '未知错误'}`
+    );
+  }
+}
+
+/**
+ * 月度分析命令 - 手动触发月度分析流程
+ * 用法：
+ *   /nps analyze              - 触发月度分析（标签自进化+Top问题+月报）
+ *   /nps analyze 2026-06      - 触发月度分析并指定周期名称
+ *   /nps analyze view 2026-06 - 查询已有分析报告
+ */
+async function handleAnalysis(cmd: BotCommand): Promise<void> {
+  const firstArg = cmd.args[0]?.toLowerCase();
+  const secondArg = cmd.args[1];
+
+  // /nps analyze view [周期名] - 查询已有报告
+  if (firstArg === 'view' || firstArg === '查看') {
+    const periodName = secondArg || '最近30天';
+    try {
+      const analysisRecords = await bitableClient.searchRecords(
+        TABLE_NAMES.ANALYSIS,
+        ANALYSIS_FIELDS.PERIOD_NAME,
+        periodName
+      );
+
+      if (analysisRecords.length > 0) {
+        const analysis = analysisRecords[0];
+        const topIssues = JSON.parse(String(analysis.fields[ANALYSIS_FIELDS.TOP_ISSUES] || '[]'));
+
+        await feishuBot.sendCardMessage(
+          cmd.chatId,
+          createAnalysisCard({
+            periodName: String(analysis.fields[ANALYSIS_FIELDS.PERIOD_NAME]),
+            totalFeedbacks: Number(analysis.fields[ANALYSIS_FIELDS.TOTAL_FEEDBACKS]),
+            npsScore: Number(analysis.fields[ANALYSIS_FIELDS.NPS_SCORE]),
+            topIssues,
+            promoterCount: 0,
+            passiveCount: 0,
+            detractorCount: 0,
+          })
+        );
+      } else {
+        await feishuBot.sendTextMessage(
+          cmd.chatId,
+          `未找到 "${periodName}" 的分析报告。\n请先执行 /nps analyze 生成报告。`
+        );
+      }
+    } catch (error) {
+      console.error('[Webhook] 查询分析失败', error);
+      await feishuBot.sendTextMessage(cmd.chatId, '查询分析失败，请稍后重试');
+    }
+    return;
+  }
+
+  // /nps analyze [周期名] - 触发月度分析
+  try {
+    await feishuBot.sendTextMessage(
+      cmd.chatId,
+      '🔄 月度分析任务已触发，预计需要 30-60 秒。完成后会在群里收到月报通知。'
+    );
+
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3000';
+    const cronUrl = `${baseUrl}/api/cron/monthly`;
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (process.env.CRON_SECRET) {
+      headers['Authorization'] = `Bearer ${process.env.CRON_SECRET}`;
+    }
+
+    const response = await fetch(cronUrl, {
+      method: 'POST',
+      headers,
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const result = await response.json();
+    const evolutionCount = result.evolution?.actions?.length || 0;
+    const topIssuesCount = result.topIssues?.length || 0;
+
+    await feishuBot.sendTextMessage(
+      cmd.chatId,
+      `✅ 月度分析完成！\n` +
+      `• 标签自进化: ${evolutionCount} 项操作\n` +
+      `• Top 问题: ${topIssuesCount} 条\n` +
+      `• 公式同步: ${result.formulaSync ? '成功' : '失败'}\n` +
+      `• 会议文档: ${result.meetingDoc?.url || '已生成'}\n` +
+      `• 通知发送: ${result.notification ? '成功' : '失败'}`
+    );
+  } catch (error) {
+    console.error('[Webhook] 触发月度分析失败', error);
+    await feishuBot.sendTextMessage(
+      cmd.chatId,
+      `触发月度分析失败: ${error instanceof Error ? error.message : '未知错误'}`
     );
   }
 }

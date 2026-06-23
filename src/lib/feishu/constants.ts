@@ -26,6 +26,8 @@ export const TABLE_NAMES = {
   TENANTS: 'tenants',
   /** Top问题表 */
   TOP_ISSUES: 'top_issues',
+  /** 周期分析表（用于存储分析报告） */
+  ANALYSIS: 'analysis',
 } as const;
 
 export type TableName = typeof TABLE_NAMES[keyof typeof TABLE_NAMES];
@@ -375,8 +377,18 @@ export const TABLE_DEFINITIONS: Record<string, { name: string; fields: BitableFi
   },
 };
 
+/** 周期分析表字段名（用于存储分析报告） */
+export const ANALYSIS_FIELDS = {
+  PERIOD_NAME: '周期名称',
+  TOTAL_FEEDBACKS: '总反馈数',
+  NPS_SCORE: 'NPS得分',
+  TOP_ISSUES: '主要问题',
+  START_DATE: '开始日期',
+  END_DATE: '结束日期',
+  CREATED_AT: '创建时间',
+} as const;
+
 // Alias for backward compatibility
-export const ANALYSIS_FIELDS = TOP_ISSUES_FIELDS;
 export const TABLE_NAMES_ANALYSIS = TABLE_NAMES.TOP_ISSUES;
 
 // ============================================

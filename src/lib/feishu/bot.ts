@@ -863,14 +863,14 @@ export function createOnboardingCard(): InteractiveMessageContent {
 export function createHelpCard(): InteractiveMessageContent {
   return {
     config: {
-      wide_screen_mode: true,
+      wide_screen_mode: true
     },
     header: {
       title: {
         tag: 'lark_md',
-        content: '**NPS Insight Bot 使用帮助**',
+        content: '**NPS Insight Bot 使用帮助**'
       },
-      template: 'blue',
+      template: 'blue'
     },
     elements: [
       {
@@ -884,11 +884,11 @@ export function createHelpCard(): InteractiveMessageContent {
             '`最多问题是什么？` - 查看TOP问题\n' +
             '`评分分布怎么样？` - 查看分数分布\n' +
             '`Bug类反馈有多少？` - 按标签统计\n' +
-            '`1-2分的差评有哪些？` - 筛选低分反馈',
-        },
+            '`1-2分的差评有哪些？` - 筛选低分反馈'
+        }
       },
       {
-        tag: 'hr',
+        tag: 'hr'
       },
       {
         tag: 'div',
@@ -898,23 +898,27 @@ export function createHelpCard(): InteractiveMessageContent {
             '**⌨️ 快捷命令**\n\n' +
             '`/nps help` - 显示帮助\n' +
             '`/nps report` - NPS报告\n' +
-            '`/nps analysis [周期]` - 周期分析\n' +
+            '`/nps tag` - **手动触发打标**\n' +
+            '`/nps analyze` - **手动触发月度分析**\n' +
+            '`/nps analyze view [周期]` - 查看周期分析\n' +
             '`/nps feedback [数量]` - 反馈列表\n' +
-            '`/nps config` - 系统配置',
-        },
+            '`/nps status` - 系统状态\n' +
+            '`/nps config` - 系统配置'
+        }
       },
       {
-        tag: 'hr',
+        tag: 'hr'
       },
       {
         tag: 'div',
         text: {
           tag: 'lark_md',
-          content: '**💡 示例：**\n`@NPS Insight NPS总体情况如何？`\n`/nps analysis 2024-Q1`\n`/nps feedback 5`',
-        },
-      },
-    ],
-  };
+          content:
+            '**💡 示例：**\n`@NPS Insight NPS总体情况如何？`\n`/nps analysis 2024-Q1`\n`/nps feedback 5`'
+        }
+      }
+    ]
+  }
 }
 
 /**

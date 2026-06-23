@@ -30,6 +30,7 @@ export interface TagRecord {
   tag3Name: string;
   usageCount: number;
   recordId: string;
+  table?: 'tag1' | 'tag2' | 'tag3';
 }
 
 // ============================================

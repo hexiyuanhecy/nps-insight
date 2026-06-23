@@ -22,7 +22,8 @@
       "Bash(xargs -r -n 1 git update-ref -d)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git remote *)"
     ]
   }
 }

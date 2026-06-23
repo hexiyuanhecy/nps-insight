@@ -1,0 +1,6 @@
+{
+  "/admin/page": "app/admin/page.js",
+  "/page": "app/page.js",
+  "/api/webhook/feishu/route": "app/api/webhook/feishu/route.js",
+  "/api/cron/monthly/route": "app/api/cron/monthly/route.js"
+}
