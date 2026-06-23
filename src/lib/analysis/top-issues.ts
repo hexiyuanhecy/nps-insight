@@ -69,6 +69,11 @@ export class TopIssuesGenerator {
   private storage: StorageAdapter;
   private weights: SortWeights;
   private tagMappings: TagMappings;
+  /** 标签名称到 record_id 的反向映射（用于关联引用写入） */
+  private tagNameToIdMap: {
+    tag2: Map<string, string>;
+    tag3: Map<string, string>;
+  };
 
   constructor(storage?: StorageAdapter) {
     this.storage = storage || getDefaultStorage();
@@ -77,6 +82,10 @@ export class TopIssuesGenerator {
       tag1Map: new Map(),
       tag2Map: new Map(),
       tag3Map: new Map(),
+    };
+    this.tagNameToIdMap = {
+      tag2: new Map(),
+      tag3: new Map(),
     };
   }
 
@@ -146,6 +155,7 @@ export class TopIssuesGenerator {
       const existing = existingMap.get(issue.issueKey);
 
       if (existing) {
+        // 已存在的问题：只更新统计字段，不覆盖人工填写的字段
         recordsToUpdate.push({
           record_id: existing.record_id,
           fields: {
@@ -160,10 +170,18 @@ export class TopIssuesGenerator {
           },
         });
       } else {
+        // 新问题：写入关联引用字段（使用 record_id）
+        const tag2RecordId = this.tagNameToIdMap.tag2.get(issue.tag2Name) || '';
+        const tag3RecordIds = issue.tag3Names
+          .map(name => this.tagNameToIdMap.tag3.get(name) || '')
+          .filter(id => id !== '');
+
         recordsToCreate.push({
           fields: {
-            [TOP_ISSUES_FIELDS.TAG2_NAME]: issue.tag2Name,
-            [TOP_ISSUES_FIELDS.TAG3_NAMES]: issue.tag3Names,
+            // 所属模块：关联引用 Tag2（单选）
+            [TOP_ISSUES_FIELDS.TAG2_NAME]: tag2RecordId ? [tag2RecordId] : [],
+            // 具体问题：关联引用 Tag3（多选）
+            [TOP_ISSUES_FIELDS.TAG3_NAMES]: tag3RecordIds,
             [TOP_ISSUES_FIELDS.ISSUE_KEY]: issue.issueKey,
             [TOP_ISSUES_FIELDS.TOTAL_COUNT]: issue.totalCount,
             [TOP_ISSUES_FIELDS.PERIOD_NEW_COUNT]: issue.periodNewCount,
@@ -195,7 +213,7 @@ export class TopIssuesGenerator {
 
   /**
    * 加载标签映射
-   * 从 Tag1/Tag2/Tag3 表读取所有标签，建立 recordId -> name 的映射
+   * 从 Tag1/Tag2/Tag3 表读取所有标签，建立 recordId -> name 和 name -> recordId 的双向映射
    */
   private async loadTagMappings(): Promise<void> {
     const tag1Records = await this.storage.listRecords(TABLES.TAG1, { pageSize: 500 });
@@ -210,21 +228,27 @@ export class TopIssuesGenerator {
 
     const tag2Records = await this.storage.listRecords(TABLES.TAG2, { pageSize: 500 });
     this.tagMappings.tag2Map = new Map();
+    this.tagNameToIdMap.tag2 = new Map();
     for (const record of tag2Records) {
       const recordId = record.record_id;
       const name = String(record.fields[TAG2_FIELDS.NAME] || '');
       if (recordId && name) {
         this.tagMappings.tag2Map.set(recordId, name);
+        // 建立反向映射（用于关联引用写入）
+        this.tagNameToIdMap.tag2.set(name, recordId);
       }
     }
 
     const tag3Records = await this.storage.listRecords(TABLES.TAG3, { pageSize: 500 });
     this.tagMappings.tag3Map = new Map();
+    this.tagNameToIdMap.tag3 = new Map();
     for (const record of tag3Records) {
       const recordId = record.record_id;
       const name = String(record.fields[TAG3_FIELDS.NAME] || '');
       if (recordId && name) {
         this.tagMappings.tag3Map.set(recordId, name);
+        // 建立反向映射（用于关联引用写入）
+        this.tagNameToIdMap.tag3.set(name, recordId);
       }
     }
   }

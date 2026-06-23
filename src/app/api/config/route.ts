@@ -676,19 +676,13 @@ async function createBitableAction(data: any) {
       data.url || `https://www.feishu.cn/base/${result.appToken}`
     );
 
-    // 映射 tables → tableId
-    const tables: any = {};
-    (result.tables || []).forEach((t: any) => {
-      const key = t.key || t.tableId || '';
-      if (key.includes('feedback')) tables.feedbackTableId = t.tableId;
-      else if (key.includes('tag')) tables.tagsTableId = t.tableId;
-      else if (key.includes('tenant')) tables.tenantsTableId = t.tableId;
-      else if (key.includes('analysis') || key.includes('top')) tables.analysisTableId = t.tableId;
-    });
-    if (result.tables && result.tables[0]) tables.feedbackTableId = tables.feedbackTableId || result.tables[0].tableId;
-    if (result.tables && result.tables[1]) tables.tagsTableId = tables.tagsTableId || result.tables[1].tableId;
-    if (result.tables && result.tables[2]) tables.tenantsTableId = tables.tenantsTableId || result.tables[2].tableId;
-    if (result.tables && result.tables[3]) tables.analysisTableId = tables.analysisTableId || result.tables[3].tableId;
+    // 映射 tables → tableId（BitableInfo.tables 是对象，不是数组）
+    const tables: any = {
+      feedbackTableId: result.tables?.feedbackTableId || '',
+      tagsTableId: result.tables?.tag1TableId || result.tables?.tag2TableId || result.tables?.tag3TableId || '',
+      tenantsTableId: result.tables?.tenantTableId || '',
+      analysisTableId: result.tables?.periodTableId || '',
+    };
 
     return NextResponse.json({
       success: true,

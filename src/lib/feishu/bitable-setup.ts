@@ -97,11 +97,11 @@ export async function createNPSInsightBitable(
   const tag2TableId = await createTag2Table(token, appToken, tag1TableId);
   const tag3TableId = await createTag3Table(token, appToken, tag2TableId);
 
-  // 3. 创建其他表（反馈表需要引用标签表ID）
+  // 3. 创建其他表（反馈表需要引用标签表ID，周期分析表需要引用Tag2/Tag3）
   const [feedbackTableId, tenantTableId, periodTableId] = await Promise.all([
     createFeedbackListTable(token, appToken, tag1TableId, tag2TableId, tag3TableId),
     createTenantInfoTable(token, appToken),
-    createPeriodAnalysisTable(token, appToken),
+    createPeriodAnalysisTable(token, appToken, tag2TableId, tag3TableId),
   ]);
 
   // 4. 为标签表添加公式字段（需在所有表创建完成后执行）
@@ -282,6 +282,7 @@ async function addFormulaField(
 /**
  * 创建「反馈列表」表
  * tag1/tag2/tag3 字段为双向关联字段，关联到对应的标签表
+ * PRD v2 字段名：content → 反馈原文，source → 反馈平台
  */
 async function createFeedbackListTable(
   token: string,
@@ -317,9 +318,11 @@ async function createFeedbackListTable(
             type: 4,
             property: { options: MODULE_OPTIONS },
           },
-          { field_name: 'content', type: 1 },
+          // PRD v2: content → 反馈原文
+          { field_name: '反馈原文', type: 1 },
           { field_name: 'npsScore', type: 2 },
-          { field_name: 'source', type: 1 },
+          // PRD v2: source → 反馈平台
+          { field_name: '反馈平台', type: 1 },
           {
             field_name: 'tag1',
             type: 16,
@@ -541,9 +544,15 @@ async function createTenantInfoTable(token: string, appToken: string): Promise<s
 }
 
 /**
- * 创建「周期分析」表
+ * 创建「周期分析」表（Top问题表）
+ * PRD v2 要求：所属模块关联Tag2，具体问题关联Tag3（多选）
  */
-async function createPeriodAnalysisTable(token: string, appToken: string): Promise<string> {
+async function createPeriodAnalysisTable(
+  token: string,
+  appToken: string,
+  tag2TableId: string,
+  tag3TableId: string
+): Promise<string> {
   const response = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/tables`, {
     method: 'POST',
     headers: {
@@ -553,6 +562,7 @@ async function createPeriodAnalysisTable(token: string, appToken: string): Promi
     body: JSON.stringify({
       table: {
         name: '周期分析',
+        default_view_name: '默认视图',
         fields: [
           { field_name: 'periodId', type: 1 },
           { field_name: 'periodName', type: 1 },
@@ -560,7 +570,57 @@ async function createPeriodAnalysisTable(token: string, appToken: string): Promi
           { field_name: 'endDate', type: 5 },
           { field_name: 'totalFeedbacks', type: 2 },
           { field_name: 'avgScore', type: 2 },
-          { field_name: 'topIssues', type: 7 },
+          // 所属模块：关联引用 Tag2 表（单选）
+          {
+            field_name: '所属模块',
+            type: 16,
+            property: { foreign_table_id: tag2TableId },
+          },
+          // 具体问题：关联引用 Tag3 表（多选）
+          {
+            field_name: '具体问题',
+            type: 16,
+            property: {
+              foreign_table_id: tag3TableId,
+              multiple: true,
+            },
+          },
+          { field_name: '问题标识', type: 1 },
+          { field_name: '总反馈数', type: 2 },
+          { field_name: '本周期新增', type: 2 },
+          { field_name: 'A4反馈数', type: 2 },
+          { field_name: 'A5反馈数', type: 2 },
+          { field_name: 'A6反馈数', type: 2 },
+          { field_name: '大租户反馈数', type: 2 },
+          { field_name: '大租户占比', type: 2 },
+          { field_name: '平均分', type: 2 },
+          { field_name: '人工排序', type: 2 },
+          { field_name: '负责人', type: 1 },
+          { field_name: '解决方案', type: 1 },
+          {
+            field_name: '状态',
+            type: 3,
+            property: {
+              options: [
+                { name: '待讨论', color: 0 },
+                { name: '已排期', color: 1 },
+                { name: '已上线', color: 2 },
+                { name: '验证中', color: 3 },
+              ],
+            },
+          },
+          {
+            field_name: '迭代周期',
+            type: 3,
+            property: {
+              options: [
+                { name: 'Sprint 1', color: 0 },
+                { name: 'Sprint 2', color: 1 },
+                { name: 'Sprint 3+', color: 2 },
+                { name: '待定', color: 3 },
+              ],
+            },
+          },
         ],
       },
     }),
@@ -655,18 +715,29 @@ export async function validateAndGetBitableInfo(
 
 /**
  * 检查表格是否包含必要字段
+ * 返回所有表的 ID
  */
 export function checkRequiredFields(
   tables: TableInfo[]
 ): {
   hasFeedbackTable: boolean;
   feedbackTableId?: string;
+  tagsTableId?: string;
+  tenantsTableId?: string;
+  analysisTableId?: string;
   missingFields: string[];
   fieldMapping: Record<string, string>;
 } {
   const feedbackTable = tables.find(
     (t) => t.name === '反馈列表' || t.fields.some((f) => f.fieldName === 'feedbackId')
   );
+
+  // 查找其他表
+  const tag1Table = tables.find(t => t.name === 'Tag1表' || t.name === 'Tag1');
+  const tag2Table = tables.find(t => t.name === 'Tag2表' || t.name === 'Tag2');
+  const tag3Table = tables.find(t => t.name === 'Tag3表' || t.name === 'Tag3');
+  const tenantTable = tables.find(t => t.name === '租户信息' || t.name === '租户表');
+  const analysisTable = tables.find(t => t.name === '周期分析' || t.name === 'Top问题表' || t.name === '分析表');
 
   if (!feedbackTable) {
     return {
@@ -679,8 +750,8 @@ export function checkRequiredFields(
   const existingFields = feedbackTable.fields.map((f) => f.fieldName);
 
   const hasFeedbackId = existingFields.includes('feedbackId');
-  const hasContent = existingFields.includes('content');
-  const hasScore = existingFields.includes('score') || existingFields.includes('npsScore');
+  const hasContent = existingFields.includes('content') || existingFields.includes('反馈原文');
+  const hasScore = existingFields.includes('score') || existingFields.includes('npsScore') || existingFields.includes('评分');
   const hasStatus = existingFields.includes('status');
 
   const missingFields: string[] = [];
@@ -694,7 +765,7 @@ export function checkRequiredFields(
     const name = field.fieldName.toLowerCase();
     if (name.includes('id') || name.includes('编号')) {
       fieldMapping['feedbackId'] = field.fieldName;
-    } else if (name.includes('content') || name.includes('内容') || name.includes('评价')) {
+    } else if (name.includes('content') || name.includes('内容') || name.includes('评价') || name.includes('原文')) {
       fieldMapping['content'] = field.fieldName;
     } else if (name.includes('score') || name.includes('评分')) {
       fieldMapping['score'] = field.fieldName;
@@ -706,6 +777,9 @@ export function checkRequiredFields(
   return {
     hasFeedbackTable: true,
     feedbackTableId: feedbackTable.tableId,
+    tagsTableId: tag1Table?.tableId || tag2Table?.tableId || tag3Table?.tableId || '',
+    tenantsTableId: tenantTable?.tableId || '',
+    analysisTableId: analysisTable?.tableId || '',
     missingFields,
     fieldMapping,
   };

@@ -34,7 +34,7 @@ export type TableName = typeof TABLE_NAMES[keyof typeof TABLE_NAMES];
 // 反馈表字段定义
 // ============================================
 
-/** 反馈表字段名 —— 与PRD v6.0 严格对应 */
+/** 反馈表字段名 —— 与PRD v2 严格对应 */
 export const FEEDBACK_FIELDS = {
   FEEDBACK_ID: '反馈ID',
   TENANT_ID: '租户ID',
@@ -44,10 +44,10 @@ export const FEEDBACK_FIELDS = {
   USER_NAME: '用户名称',
   CREATE_TIME: '创建时间',
   UNSATISFACTION_REASON: '不满意原因',
-  CONTENT: '反馈内容',
+  CONTENT: '反馈原文',
   TRANSLATED_CONTENT: '翻译内容',
   NPS_SCORE: '评分',
-  SOURCE: '来源',
+  SOURCE: '反馈平台',
   TAG1: 'Tag1',
   TAG2: 'Tag2',
   TAG3: 'Tag3',
@@ -223,10 +223,12 @@ export const TOP_ISSUES_FIELDS = {
   STATUS: '状态',
 } as const;
 
-/** Top问题表字段定义（用于自动建表） */
+/** Top问题表字段定义（用于自动建表）—— PRD v2 要求关联引用 */
 export const TOP_ISSUES_FIELD_DEFS: BitableField[] = [
-  { field_name: '所属模块', field_type: 'Text' },
-  { field_name: '具体问题', field_type: 'Text' },
+  // 所属模块：关联引用 Tag2 表（单选）
+  { field_name: '所属模块', field_type: 'SingleLink', property: { foreign_table_id: '' } },
+  // 具体问题：关联引用 Tag3 表（多选）
+  { field_name: '具体问题', field_type: 'MultiLink', property: { foreign_table_id: '' } },
   { field_name: '问题标识', field_type: 'Text' },
   { field_name: '总反馈数', field_type: 'Number' },
   { field_name: '本周期新增', field_type: 'Number' },

@@ -38,13 +38,11 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
     const status = searchParams.get('status');
     const priority = searchParams.get('priority');
-    const moduleName = searchParams.get('module');
     const tenantId = searchParams.get('tenantId');
 
     // 构建过滤条件
     const conditions: Array<{ field: string; operator: string; value: unknown }> = [];
     if (status) conditions.push({ field: FEEDBACK_FIELDS.STATUS, operator: 'is', value: status });
-    if (moduleName) conditions.push({ field: FEEDBACK_FIELDS.MODULE, operator: 'contains', value: moduleName });
     if (tenantId) conditions.push({ field: FEEDBACK_FIELDS.TENANT_ID, operator: 'is', value: tenantId });
 
     let filter: string | undefined;
@@ -101,7 +99,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body: CreateFeedbackRequest & { autoTag?: boolean } = await request.json();
-    const { tenantId, userId, userName, module, content, npsScore, source, autoTag = true } = body;
+    const { tenantId, userId, userName, content, npsScore, source, autoTag = true } = body;
 
     // 参数校验
     if (!tenantId || !content || npsScore === undefined) {
@@ -122,7 +120,6 @@ export async function POST(request: NextRequest) {
       [FEEDBACK_FIELDS.USER_ID]: userId || '',
       [FEEDBACK_FIELDS.USER_NAME]: userName || '',
       [FEEDBACK_FIELDS.CREATE_TIME]: now,
-      [FEEDBACK_FIELDS.MODULE]: module || '',
       [FEEDBACK_FIELDS.CONTENT]: content,
       [FEEDBACK_FIELDS.NPS_SCORE]: npsScore,
       [FEEDBACK_FIELDS.SOURCE]: source || 'manual',
@@ -136,7 +133,6 @@ export async function POST(request: NextRequest) {
         const analysisResult = await analyzeFeedback({
           content,
           npsScore,
-          module: module || '',
         });
 
         // 查找或创建标签（ensureTagExists 已在 completeTaggingProcess 中调用）
@@ -199,11 +195,6 @@ export async function PUT(request: NextRequest) {
     if (updates.tag1 !== undefined) fields[FEEDBACK_FIELDS.TAG1] = updates.tag1;
     if (updates.tag2 !== undefined) fields[FEEDBACK_FIELDS.TAG2] = updates.tag2;
     if (updates.tag3 !== undefined) fields[FEEDBACK_FIELDS.TAG3] = updates.tag3;
-    if (updates.tenantName !== undefined) fields[FEEDBACK_FIELDS.TENANT_NAME] = updates.tenantName;
-    if (updates.tenantScale !== undefined) fields[FEEDBACK_FIELDS.TENANT_SCALE] = updates.tenantScale;
-    if (updates.confidence !== undefined) fields[FEEDBACK_FIELDS.CONFIDENCE] = updates.confidence;
-    if (updates.content !== undefined) fields[FEEDBACK_FIELDS.CONTENT] = updates.content;
-    if (updates.module !== undefined) fields[FEEDBACK_FIELDS.MODULE] = updates.module;
     if (updates.npsScore !== undefined) fields[FEEDBACK_FIELDS.NPS_SCORE] = updates.npsScore;
 
     if (Object.keys(fields).length === 0) {
@@ -279,7 +270,8 @@ function recordToFeedback(record: { record_id: string; fields: Record<string, un
     userId: extractFieldValue(f[FEEDBACK_FIELDS.USER_ID]),
     userName: extractFieldValue(f[FEEDBACK_FIELDS.USER_NAME]),
     createTime: String(f[FEEDBACK_FIELDS.CREATE_TIME] || ''),
-    module: extractFieldValue(f[FEEDBACK_FIELDS.MODULE]),
+    // module 字段暂时使用 UNSATISFACTION_REASON 替代（PRD v2 中无 module）
+    module: extractFieldValue(f[FEEDBACK_FIELDS.UNSATISFACTION_REASON]),
     content: extractFieldValue(f[FEEDBACK_FIELDS.CONTENT]),
     npsScore: Number(f[FEEDBACK_FIELDS.NPS_SCORE] || 0),
     source: extractFieldValue(f[FEEDBACK_FIELDS.SOURCE]),

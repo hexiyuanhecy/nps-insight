@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bitableClient, extractFieldValue } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
+import { TABLES } from '@/lib/storage/base-storage';
 import { getDefaultDocument, getDefaultNotification, getDefaultStorage } from '@/lib/adapter-factory';
 import { TagEvolution } from '@/lib/ai/tag-evolution';
 import { TopIssuesGenerator } from '@/lib/analysis/top-issues';
@@ -294,7 +295,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 返回月报列表
-    const records = await bitableClient.listRecords(TABLE_NAMES.ANALYSIS, { pageSize: 500 });
+    const records = await bitableClient.listRecords(TABLES.TOP_ISSUES, { pageSize: 500 });
 
     const monthlyReports = records
       .filter((r) => {
@@ -361,7 +362,7 @@ export async function POST(request: NextRequest) {
           `• Top问题: ${result.topIssues.slice(0, 3).map((t) => `${t.tag1 || ''}${t.tag2 ? '-' + t.tag2 : ''}`).join(', ') || '无'}\n` +
           (result.documentUrl ? `\n📄 [查看会议文档](${result.documentUrl})` : '');
 
-        await notification.send(chatId, message);
+        await notification.sendText(chatId, message);
       } catch (notifyError) {
         console.error('[API] 发送月报通知失败', notifyError);
       }

@@ -51,25 +51,31 @@ export enum NPSCategory {
 // 数据模型类型
 // ============================================
 
-/** NPS反馈记录 */
+/** NPS反馈记录 —— 与PRD v2对齐 */
 export interface Feedback {
   /** 唯一标识 */
   feedbackId: string;
   /** 租户ID */
   tenantId: string;
+  /** 租户名称 */
+  tenantName?: string;
+  /** 租户规模 */
+  tenantScale?: string;
   /** 用户ID */
   userId: string;
   /** 用户名称 */
   userName: string;
   /** 创建时间 */
   createTime: string;
-  /** 所属模块/产品 */
-  module: string;
-  /** 反馈内容 */
+  /** 不满意原因（PRD v2：不满意原因，多选） */
+  module?: string;
+  /** 反馈原文 */
   content: string;
-  /** NPS评分 (0-10) */
+  /** 翻译后文本 */
+  translatedContent?: string;
+  /** NPS评分 (1-5) */
   npsScore: number;
-  /** 数据来源 */
+  /** 反馈平台 */
   source: string;
   /** 一级标签 */
   tag1?: string;
@@ -77,12 +83,20 @@ export interface Feedback {
   tag2?: string;
   /** 三级标签 */
   tag3?: string;
+  /** AI置信度 */
+  confidence?: number;
+  /** 需查日志 */
+  needLogCheck?: boolean;
+  /** 待审核 */
+  reviewNeeded?: boolean;
+  /** 打标时间 */
+  tagTime?: string;
   /** AI生成的摘要 */
   summary?: string;
   /** AI建议 */
   suggestions?: string;
   /** 优先级 */
-  priority: Priority;
+  priority?: Priority;
   /** 处理状态 */
   status: FeedbackStatus;
   /** 处理人ID */

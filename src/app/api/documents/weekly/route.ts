@@ -264,7 +264,7 @@ export async function POST(request: NextRequest) {
           `• Top问题: ${result.topIssues.slice(0, 3).map((t) => t.tag1).join(', ') || '无'}\n` +
           (result.documentUrl ? `\n📄 [查看文档](${result.documentUrl})` : '');
 
-        await notification.send(chatId, message);
+        await notification.sendText(chatId, message);
       } catch (notifyError) {
         console.error('[API] 发送周报通知失败', notifyError);
       }

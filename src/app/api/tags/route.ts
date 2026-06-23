@@ -7,15 +7,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  findOrCreateTag,
-  getAllTag1,
-  getAllTag2,
-  getAllTag3,
   getAllTags,
 } from '@/lib/ai/tagger';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS } from '@/lib/feishu/constants';
-import { PaginatedResponse, Tag, Tag1, Tag2, Tag3, TagStatus } from '@/lib/types';
+import { PaginatedResponse, Tag, TagStatus } from '@/lib/types';
+import { TABLES } from '@/lib/storage/base-storage';
 
 type TagLevel = 'tag1' | 'tag2' | 'tag3';
 
@@ -39,21 +36,23 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
     const level = searchParams.get('level') as TagLevel | null;
 
+    // 使用 getAllTags 并按层级过滤
+    const allTags = await getAllTags();
+
     if (level === 'tag1') {
-      const tags = await getAllTag1();
-      return NextResponse.json({ success: true, data: paginate<Tag1>(tags, page, pageSize) });
+      const tags = allTags.filter(t => t.table === 'tag1');
+      return NextResponse.json({ success: true, data: paginate<Tag>(tags as Tag[], page, pageSize) });
     }
     if (level === 'tag2') {
-      const tags = await getAllTag2();
-      return NextResponse.json({ success: true, data: paginate<Tag2>(tags, page, pageSize) });
+      const tags = allTags.filter(t => t.table === 'tag2');
+      return NextResponse.json({ success: true, data: paginate<Tag>(tags as Tag[], page, pageSize) });
     }
     if (level === 'tag3') {
-      const tags = await getAllTag3();
-      return NextResponse.json({ success: true, data: paginate<Tag3>(tags, page, pageSize) });
+      const tags = allTags.filter(t => t.table === 'tag3');
+      return NextResponse.json({ success: true, data: paginate<Tag>(tags as Tag[], page, pageSize) });
     }
 
-    const tags = await getAllTags();
-    return NextResponse.json({ success: true, data: paginate<Tag>(tags, page, pageSize) });
+    return NextResponse.json({ success: true, data: paginate<Tag>(allTags as Tag[], page, pageSize) });
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : '未知错误';
     console.error('[API] 获取标签列表失败', error);

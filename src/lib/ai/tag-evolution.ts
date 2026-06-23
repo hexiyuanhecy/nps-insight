@@ -304,6 +304,7 @@ export class TagEvolution {
 
   /**
    * 执行标签合并
+   * PRD v2: 反馈列表的标签字段是关联引用类型，合并后需更新 record_id
    */
   async executeMerge(tag1: TagRecord, tag2: TagRecord, mergedName: string): Promise<void> {
     console.log(`[自进化] 执行合并：${tag1.fields.name} + ${tag2.fields.name} → ${mergedName}`);
@@ -311,6 +312,7 @@ export class TagEvolution {
     const table = tag1.table;
     const fields = table === 'tag1' ? TAG1_FIELDS : table === 'tag2' ? TAG2_FIELDS : TAG3_FIELDS;
 
+    // 1. 创建合并后的新标签
     const mergedTag = await this.storage.createRecord(table, {
       [fields.TAG_ID]: `${Date.now()}`,
       [fields.NAME]: mergedName,
@@ -319,24 +321,42 @@ export class TagEvolution {
       [fields.LARGE_TENANT_RATIO]: 0,
     });
 
+    const mergedRecordId = mergedTag.record_id;
+
+    // 2. 查找所有引用旧标签的反馈记录
     const feedbacks = await this.storage.listRecords(TABLES.FEEDBACK, { pageSize: 500 });
     const level = tag1.fields.level;
     const fbField = level === 'Tag1' ? FEEDBACK_FIELDS.TAG1 :
                     level === 'Tag2' ? FEEDBACK_FIELDS.TAG2 :
                     FEEDBACK_FIELDS.TAG3;
 
+    // 3. 更新反馈记录的关联引用（将旧标签的 record_id 替换为新标签的 record_id）
     const affectedFeedbacks = feedbacks.filter(f => {
-      const tagValue = String(f.fields[fbField] || '');
-      return tagValue === tag1.fields.name || tagValue === tag2.fields.name;
+      const tagValue = f.fields[fbField];
+      // 关联引用字段是数组类型，包含 record_id
+      if (Array.isArray(tagValue)) {
+        return tagValue.includes(tag1.record_id) || tagValue.includes(tag2.record_id);
+      }
+      return false;
     });
 
     for (const feedback of affectedFeedbacks) {
+      const oldTagIds = feedback.fields[fbField] as string[] || [];
+      // 移除旧标签的 record_id，添加新标签的 record_id
+      const newTagIds = oldTagIds
+        .filter(id => id !== tag1.record_id && id !== tag2.record_id)
+        .concat([mergedRecordId]);
+
       await this.storage.updateRecord(TABLES.FEEDBACK, feedback.record_id, {
-        [fbField]: [mergedName],
+        [fbField]: newTagIds,
       });
     }
 
-    console.log(`[自进化] 合并完成，已更新 ${affectedFeedbacks.length} 条反馈`);
+    // 4. 删除旧标签
+    await this.storage.deleteRecord(table, tag1.record_id);
+    await this.storage.deleteRecord(table, tag2.record_id);
+
+    console.log(`[自进化] 合并完成，已更新 ${affectedFeedbacks.length} 条反馈的关联引用`);
   }
 
   /**
