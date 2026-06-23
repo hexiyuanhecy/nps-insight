@@ -19,7 +19,10 @@
       "Bash(npm run dev*)",
       "Bash(npx kill-port)",
       "Bash(curl -s localhost:3000*)",
-      "Bash(xargs -r -n 1 git update-ref -d)"
+      "Bash(xargs -r -n 1 git update-ref -d)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ]
   }
 }
