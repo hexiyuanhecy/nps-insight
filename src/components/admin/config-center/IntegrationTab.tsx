@@ -1,4 +1,4 @@
-import { Database, FileJson, Link, Plus, Save, TestTube } from 'lucide-react';
+import { Database, FileJson, Link, Plus, Save, TestTube, Upload } from 'lucide-react';
 import type { ConfigCenterController } from '@/components/admin/config-center/use-config-center';
 import {
   CollapsiblePanel,
@@ -166,6 +166,36 @@ export function IntegrationTab({ ctrl }: IntegrationTabProps) {
         </div>
         <div className="mt-4">
           <PrimaryButton onClick={() => ctrl.saveSectionConfig('Webhook 接收地址')} loading={ctrl.isLoading} icon={<Save className="h-4 w-4" />}>保存配置</PrimaryButton>
+        </div>
+      </section>
+
+      {/* Excel 批量导入 */}
+      <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <SectionTitle icon={<Upload className="h-5 w-5" />} title="Excel 批量导入" desc="从 Excel 文件批量导入反馈数据" />
+        <div className="space-y-3">
+          <div className="rounded-lg border-2 border-dashed border-slate-300 p-6 text-center hover:border-blue-400 transition-colors">
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              id="excel-upload"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) ctrl.importExcel(file);
+                // 重置 input 以便重复上传同一文件
+                e.target.value = '';
+              }}
+            />
+            <label htmlFor="excel-upload" className="cursor-pointer">
+              <Upload className="mx-auto h-10 w-10 text-slate-400" />
+              <p className="mt-2 text-sm font-medium text-slate-700">点击上传 Excel 文件</p>
+              <p className="mt-1 text-xs text-slate-500">支持 .xlsx、.xls、.csv 格式</p>
+            </label>
+          </div>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+            <div className="font-semibold mb-1">📋 支持的列名</div>
+            <p>自动识别以下列名：反馈内容、评分、评价时间、功能模块、来源、租户ID、租户名称、租户规模等。至少需要包含「内容」和「评分」列。</p>
+          </div>
         </div>
       </section>
 

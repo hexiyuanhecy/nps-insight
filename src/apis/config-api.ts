@@ -57,3 +57,19 @@ export async function linkBitable(
 export async function retagHistory(config: TabConfig): Promise<ConfigApiResponse> {
   return postConfig({ action: 'retagHistory', config });
 }
+
+export interface ExcelUploadResult {
+  success: boolean;
+  error?: string;
+  data?: { total: number; written: number; skipped: number };
+}
+
+export async function uploadExcel(file: File): Promise<ExcelUploadResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await fetch('/api/config/import-excel', {
+    method: 'POST',
+    body: formData,
+  });
+  return response.json() as Promise<ExcelUploadResult>;
+}

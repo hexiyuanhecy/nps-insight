@@ -10,6 +10,7 @@ import {
   testAiConnection,
   testFeishuConnection,
   testNotifyConnection,
+  uploadExcel as uploadExcelApi,
 } from '@/apis/config-api';
 import { buildCronFromSchedule } from '@/components/admin/config-center/schedule-utils';
 import type { AiProviderCache, TabConfig, ToastType } from '@/components/admin/config-center/types';
@@ -251,6 +252,22 @@ export function useConfigActions({
     [aiCache, config, setAiCache, setConfig],
   );
 
+  const importExcel = useCallback(async (file: File) => {
+    try {
+      setIsLoading(true);
+      const result = await uploadExcelApi(file);
+      if (result.success && result.data) {
+        pushToast(`Excel 导入成功：共 ${result.data.total} 条，写入 ${result.data.written} 条，跳过 ${result.data.skipped} 条`, 'success');
+      } else {
+        pushToast('导入失败: ' + (result.error || '未知错误'), 'error');
+      }
+    } catch (error) {
+      pushToast('导入失败: ' + (error instanceof Error ? error.message : '未知错误'), 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [pushToast, setIsLoading]);
+
   return {
     saveSectionConfig,
     testFeishu,
@@ -262,6 +279,7 @@ export function useConfigActions({
     retagHistory,
     persistScheduleAndSave,
     handleProviderChange,
+    importExcel,
   };
 }
 
