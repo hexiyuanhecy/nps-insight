@@ -126,7 +126,7 @@ export function IntegrationTab({ ctrl }: IntegrationTabProps) {
         <SectionTitle icon={<Database className="h-5 w-5" />} title="数据源（Feelgood）" desc="定期从 Feelgood 或其他数据源拉取反馈" />
         <div className="grid gap-4">
           <TextField label="API 地址" value={config.dataSource.apiUrl} onChange={(v) => ctrl.updateDataSource('apiUrl', v)} placeholder="https://api.feelgood.example.com/feedback" hint="含协议与路径" />
-          <TextField label="API Key" value={config.dataSource.apiKey} onChange={(v) => ctrl.updateDataSource('apiKey', v)} placeholder="Bearer token" hint="需要鉴权时填写" />
+          <SecretField label="API Key" value={config.dataSource.apiKey} onChange={(v) => ctrl.updateDataSource('apiKey', v)} saved={!!config.dataSource.apiKey} placeholder="Bearer token" hint="需要鉴权时填写" />
           <TextField label="查询参数（可选）" value={config.dataSource.queryParams} onChange={(v) => ctrl.updateDataSource('queryParams', v)} placeholder="type=nps&status=new" hint="拼接到 URL 后面" />
           <SelectField
             label="时间范围规则"

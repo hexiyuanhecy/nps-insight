@@ -20,7 +20,7 @@ const BITABLE_TABLE_ID_ANALYSIS = process.env.BITABLE_TABLE_ID_ANALYSIS;
 const NOTIFICATION_CHAT_ID = process.env.NOTIFICATION_CHAT_ID;
 const CRON_SECRET = process.env.CRON_SECRET;
 
-const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
 
 /**
  * 获取飞书Tenant Access Token

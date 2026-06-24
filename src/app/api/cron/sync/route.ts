@@ -117,15 +117,15 @@ async function runSyncTask(): Promise<SyncResult> {
   // 多用户支持：尝试从 KV 获取所有配置
   try {
     const configKeys = await listAllConfigKeys();
-    
+
     if (configKeys.length > 0) {
       console.log(`[Cron] 发现 ${configKeys.length} 个用户配置，开始多用户同步`);
-      
+
       // 遍历每个用户的配置执行同步
       for (const key of configKeys) {
         const ownerId = key.replace('config:', '');
         console.log(`[Cron] 正在同步用户: ${ownerId}`);
-        
+
         try {
           const userConfig = await getConfig(ownerId);
           if (userConfig) {
@@ -140,7 +140,7 @@ async function runSyncTask(): Promise<SyncResult> {
           details.push(`[${ownerId}] 同步失败: ${userErr instanceof Error ? userErr.message : '未知错误'}`);
         }
       }
-      
+
       return {
         success: true,
         syncedCount,
@@ -563,78 +563,111 @@ async function sendNotification(syncedCount: number): Promise<boolean> {
   }
 
   try {
-    const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
-      pageSize: 500,
-    });
+    // 计算本周时间范围（用于过滤本周数据）
+    const today = new Date()
+    const weekStart = new Date(today)
+    weekStart.setDate(today.getDate() - today.getDay() + 1)
+    weekStart.setHours(0, 0, 0, 0)
+    const weekEnd = new Date(weekStart)
+    weekEnd.setDate(weekStart.getDate() + 7)
 
-    // 统计待审核数和需要查日志数
-    let reviewCount = 0;
-    let needLogCheckCount = 0;
-    const tag3Counts = new Map<string, number>();
-    const scoreCounts = new Map<number, number>();
+    const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
+      pageSize: 500
+    })
+
+    // 统计待审核数和需要查日志数（只统计本周）
+    let reviewCount = 0
+    let needLogCheckCount = 0
+    let totalScore = 0
+    let scoreCount = 0
+    const tag3Counts = new Map<string, number>()
+    const scoreCounts = new Map<number, number>()
 
     for (const r of records) {
-      const fields = r.fields || {};
-      const reviewNeeded = String(fields[FEEDBACK_FIELDS.REVIEW_NEEDED] || '').toLowerCase() === 'true' || fields[FEEDBACK_FIELDS.REVIEW_NEEDED] === true;
-      const needLog = String(fields[FEEDBACK_FIELDS.NEED_LOG_CHECK] || '').toLowerCase() === 'true' || fields[FEEDBACK_FIELDS.NEED_LOG_CHECK] === true;
-      if (reviewNeeded) reviewCount++;
-      if (needLog) needLogCheckCount++;
+      const fields = r.fields || {}
+      const createTime = new Date(
+        String(fields[FEEDBACK_FIELDS.CREATE_TIME] || '')
+      )
+
+      // 只统计本周的反馈
+      if (createTime < weekStart || createTime >= weekEnd) {
+        continue
+      }
+
+      const reviewNeeded =
+        String(fields[FEEDBACK_FIELDS.REVIEW_NEEDED] || '').toLowerCase() ===
+          'true' || fields[FEEDBACK_FIELDS.REVIEW_NEEDED] === true
+      const needLog =
+        String(fields[FEEDBACK_FIELDS.NEED_LOG_CHECK] || '').toLowerCase() ===
+          'true' || fields[FEEDBACK_FIELDS.NEED_LOG_CHECK] === true
+      if (reviewNeeded) reviewCount++
+      if (needLog) needLogCheckCount++
 
       // 统计Tag3频次
-      const tag3Val = String(fields[FEEDBACK_FIELDS.TAG3] || '');
+      const tag3Val = String(fields[FEEDBACK_FIELDS.TAG3] || '')
       if (tag3Val) {
-        tag3Counts.set(tag3Val, (tag3Counts.get(tag3Val) || 0) + 1);
+        tag3Counts.set(tag3Val, (tag3Counts.get(tag3Val) || 0) + 1)
       }
 
       // 统计评分
-      const score = Number(fields[FEEDBACK_FIELDS.NPS_SCORE] || 0);
-      if (score) scoreCounts.set(score, (scoreCounts.get(score) || 0) + 1);
+      const score = Number(fields[FEEDBACK_FIELDS.NPS_SCORE] || 0)
+      if (score) {
+        scoreCounts.set(score, (scoreCounts.get(score) || 0) + 1)
+        totalScore += score
+        scoreCount++
+      }
     }
 
-    // 构建Top 5问题
+    // 构建Top 5问题（基于本周统计数据）
     const sortedTag3 = Array.from(tag3Counts.entries())
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
+      .slice(0, 5)
 
     const topIssues = sortedTag3.map(([tag3, count]) => ({
       tag1: '',
       tag2: '',
       tag3,
       count,
-      pct: syncedCount > 0 ? Math.round((count / syncedCount) * 100) : 0,
-    }));
+      pct: scoreCount > 0 ? Math.round((count / scoreCount) * 100) : 0
+    }))
 
-    // 评分分布：1分/2-3分/4-5分
-    const s1 = scoreCounts.get(1) || 0;
-    const s23 = (scoreCounts.get(2) || 0) + (scoreCounts.get(3) || 0);
-    const s45 = (scoreCounts.get(4) || 0) + (scoreCounts.get(5) || 0);
-    const total = syncedCount > 0 ? syncedCount : 1;
+    // 评分分布：1分/2-3分/4-5分（基于本周数据）
+    const s1 = scoreCounts.get(1) || 0
+    const s23 = (scoreCounts.get(2) || 0) + (scoreCounts.get(3) || 0)
+    const s45 = (scoreCounts.get(4) || 0) + (scoreCounts.get(5) || 0)
+    const total = scoreCount > 0 ? scoreCount : 1
     const scoreDistribution = [
       { score: '1', pct: Math.round((s1 / total) * 100) },
       { score: '2-3', pct: Math.round((s23 / total) * 100) },
-      { score: '4-5', pct: Math.round((s45 / total) * 100) },
-    ];
+      { score: '4-5', pct: Math.round((s45 / total) * 100) }
+    ]
 
-    const now = new Date();
-    const weekNum = `第${getISOWeek(now)}周`;
+    // 本周平均分
+    const avgScore = scoreCount > 0 ? (totalScore / scoreCount).toFixed(1) : '0'
+
+    const weekNum = `第${getISOWeek(today)}周`
 
     await feishuBot.sendCardMessage(
       chatId,
       createWeeklyReportCard({
-        weekNumber: `${now.getFullYear()}年${weekNum}`,
-        totalFeedbacks: syncedCount,
+        weekNumber: `${today.getFullYear()}年${weekNum}`,
+        totalFeedbacks: scoreCount, // 本周反馈总数
+        newFeedbacks: syncedCount, // 本周新增反馈数
+        avgScore: Number(avgScore), // 本周平均分
         reviewCount,
         topIssues,
         scoreDistribution,
         bitableUrl: process.env.FEISHU_BITABLE_URL || '',
         logPlatformUrl: process.env.LOG_PLATFORM_URL || '',
         hasNeedLogCheck: needLogCheckCount > 0,
-        hasReviewNeeded: reviewCount > 0,
+        hasReviewNeeded: reviewCount > 0
       })
-    );
+    )
 
-    console.log(`[Cron] 通知发送成功（待审核：${reviewCount}，需查日志：${needLogCheckCount}）`);
-    return true;
+    console.log(
+      `[Cron] 通知发送成功（本周反馈：${scoreCount}，新增：${syncedCount}，待审核：${reviewCount}，需查日志：${needLogCheckCount}）`
+    )
+    return true
   } catch (error) {
     console.error('[Cron] 发送通知失败', error);
     return false;

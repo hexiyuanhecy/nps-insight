@@ -28,14 +28,34 @@ import { notifyConfigChange } from '@/lib/notification/delay-notifier';
 // ============================================
 
 const DEFAULT_TAG1 = [
-  { name: '疑似Bug', definition: '功能异常、报错、崩溃', enabled: true },
-  { name: '功能优化', definition: '功能改进建议、体验优化', enabled: true },
-  { name: '界面改进', definition: 'UI/UX 改进建议', enabled: true },
-  { name: '性能提升', definition: '卡顿、慢、性能问题', enabled: true },
-  { name: '用户教育', definition: '使用指引、文档问题、理解成本', enabled: true },
-  { name: '安全合规', definition: '安全相关问题', enabled: true },
-  { name: '无效反馈', definition: '非有效反馈、SPAM、重复', enabled: true },
-];
+  {
+    name: '疑似Bug',
+    definition: '功能异常、报错、崩溃、无法使用',
+    enabled: true
+  },
+  { name: '功能优化', definition: '功能改进建议、新功能诉求', enabled: true },
+  { name: '界面改进', definition: 'UI 问题、交互体验优化', enabled: true },
+  {
+    name: '性能提升',
+    definition: '加载慢、卡顿、响应延迟、耗电',
+    enabled: true
+  },
+  {
+    name: '用户教育',
+    definition: '不知道如何使用、使用指引不清',
+    enabled: true
+  },
+  {
+    name: '安全合规',
+    definition: '安全漏洞、隐私问题、合规要求',
+    enabled: true
+  },
+  {
+    name: '无效反馈',
+    definition: 'SPAM、广告、乱码、无法理解的内容',
+    enabled: true
+  }
+]
 
 // ============================================
 // 构建完整的 V3 配置对象（从环境变量读取）
@@ -114,11 +134,11 @@ function buildV3Config(): any {
   // 8. 打标规则
   const tagging = {
     confidenceThreshold: parseFloat(process.env.CONFIG_CONFIDENCE || '0.8'),
-    largeTenantLevels: (process.env.CONFIG_LARGE_TENANTS || 'A4,A5')
+    largeTenantLevels: (process.env.CONFIG_LARGE_TENANTS || 'A4,A5,A6')
       .split(',')
       .map((s) => s.trim())
-      .filter(Boolean),
-  };
+      .filter(Boolean)
+  }
 
   // Parse cron string into human-friendly schedule fields
   function parseCronToSchedule(cron: string) {
@@ -144,8 +164,12 @@ function buildV3Config(): any {
   }
 
   // 9. 任务周期
-  const syncParts = parseCronToSchedule(process.env.CRON_SYNC_SCHEDULE || '0 0 * * 1');
-  const analysisParts = parseCronToSchedule(process.env.CRON_ANALYSIS_SCHEDULE || '0 0 1 * *');
+  const syncParts = parseCronToSchedule(
+    process.env.CRON_SYNC_SCHEDULE || '0 9 * * 1'
+  )
+  const analysisParts = parseCronToSchedule(
+    process.env.CRON_ANALYSIS_SCHEDULE || '0 9 1 * *'
+  )
   const schedule = {
     syncUnit: syncParts.unit,
     syncEvery: syncParts.every,
@@ -157,10 +181,10 @@ function buildV3Config(): any {
     analysisTime: analysisParts.time,
     analysisWeekDay: analysisParts.weekDay,
     analysisMonthDay: analysisParts.monthDay,
-    syncCron: process.env.CRON_SYNC_SCHEDULE || '0 0 * * 1',
-    analysisCron: process.env.CRON_ANALYSIS_SCHEDULE || '0 0 1 * *',
-    devMode: process.env.CRON_DEV_MODE === 'true',
-  };
+    syncCron: process.env.CRON_SYNC_SCHEDULE || '0 9 * * 1',
+    analysisCron: process.env.CRON_ANALYSIS_SCHEDULE || '0 9 1 * *',
+    devMode: process.env.CRON_DEV_MODE === 'true'
+  }
 
   // 10. 日志平台
   const logPlatform = {
@@ -694,14 +718,25 @@ async function createBitableAction(data: any) {
   try {
     const result = await createNPSInsightBitable(data.name || 'NPS Insight 反馈中心');
 
+    const newUrl = `https://www.feishu.cn/base/${result.appToken}`;
     notifyConfigChange('bitable', 'appToken', result.appToken);
-    notifyConfigChange(
-      'bitable',
-      'url',
-      data.url || `https://www.feishu.cn/base/${result.appToken}`
-    );
+    notifyConfigChange('bitable', 'url', newUrl);
 
-    // 映射 tables → tableId（BitableInfo.tables 是对象，不是数组）
+    const baseConfig = buildV3Config();
+    const updatedConfig = {
+      ...baseConfig,
+      bitable: {
+        ...baseConfig.bitable,
+        mode: 'link',
+        appToken: result.appToken,
+        url: newUrl,
+        status: 'linked',
+      },
+    };
+    await saveConfigV3(updatedConfig);
+    console.log('[创建表格] 配置已持久化到 .env');
+    console.log('[创建表格] appToken:', result.appToken);
+
     const tables: any = {
       feedbackTableId: result.tables?.feedbackTableId || '',
       tagsTableId: result.tables?.tag1TableId || result.tables?.tag2TableId || result.tables?.tag3TableId || '',
@@ -714,7 +749,7 @@ async function createBitableAction(data: any) {
       message: '多维表格创建成功',
       data: {
         appToken: result.appToken,
-        url: `https://www.feishu.cn/base/${result.appToken}`,
+        url: newUrl,
         tables,
       },
     });

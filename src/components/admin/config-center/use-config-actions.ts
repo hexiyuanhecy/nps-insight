@@ -119,9 +119,8 @@ export function useConfigActions({
       setIsLoading(true);
       const result = await createBitable(config.feishu);
       if (result.success) {
-        pushToast('多维表格创建成功', 'success');
         const newAppToken = result.appToken || '';
-        setConfig({
+        const newConfig = {
           ...config,
           bitable: {
             ...config.bitable,
@@ -130,7 +129,13 @@ export function useConfigActions({
             url: newAppToken ? `https://bytedance.feishu.cn/base/${newAppToken}` : '',
             status: 'linked',
           },
-        });
+        };
+        setConfig(newConfig);
+        const saveResult = await saveConfigV3(newConfig);
+        if (saveResult.success) {
+          await loadConfig();
+        }
+        pushToast('多维表格创建成功', 'success');
         setBitableCreateOpen(false);
       } else {
         pushToast('创建失败: ' + result.error, 'error');
@@ -140,7 +145,7 @@ export function useConfigActions({
     } finally {
       setIsLoading(false);
     }
-  }, [config, pushToast, setBitableCreateOpen, setConfig, setIsLoading]);
+  }, [config, loadConfig, pushToast, setBitableCreateOpen, setConfig, setIsLoading, saveConfigV3]);
 
   const linkTable = useCallback(async () => {
     if (!config) return;
@@ -152,8 +157,7 @@ export function useConfigActions({
       setIsLoading(true);
       const result = await linkBitable(config.feishu, config.bitable.appToken);
       if (result.success) {
-        pushToast('表格绑定成功', 'success');
-        setConfig({
+        const newConfig = {
           ...config,
           bitable: {
             ...config.bitable,
@@ -161,7 +165,10 @@ export function useConfigActions({
             url: `https://bytedance.feishu.cn/base/${config.bitable.appToken}`,
             status: 'linked',
           },
-        });
+        };
+        setConfig(newConfig);
+        await saveConfigV3(newConfig);
+        pushToast('表格绑定成功', 'success');
         setBitableLinkOpen(false);
       } else {
         pushToast('绑定失败: ' + result.error, 'error');
@@ -171,7 +178,7 @@ export function useConfigActions({
     } finally {
       setIsLoading(false);
     }
-  }, [config, pushToast, setBitableLinkOpen, setConfig, setIsLoading]);
+  }, [config, pushToast, setBitableLinkOpen, setConfig, setIsLoading, saveConfigV3]);
 
   const retagHistory = useCallback(async () => {
     if (!config) return;

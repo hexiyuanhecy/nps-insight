@@ -90,71 +90,84 @@ async function handleBotAddedEvent(event: FeishuWebhookEvent): Promise<void> {
  * 处理消息事件
  */
 async function handleMessageEvent(event: FeishuWebhookEvent): Promise<void> {
-  const message = event.event;
-  if (!message) return;
+  const message = event.event
+  if (!message) return
 
   // 只处理文本消息
-  if (message.message_type !== 'text') return;
+  if (message.message_type !== 'text') return
 
-  // 解析消息内容
-  let content: { text?: string } = {};
-  try {
-    content = JSON.parse(message.content || '{}');
-  } catch {
-    console.warn('[Webhook] 消息内容解析失败');
-    return;
+  const chatId = message.chat_id || ''
+  const senderId = message.sender?.sender_id?.open_id || ''
+  const messageId = message.message_id || ''
+
+  // 如果没有 chatId，无法发送响应
+  if (!chatId) {
+    console.warn('[Webhook] 消息缺少 chatId')
+    return
   }
 
-  const text = content.text || '';
-  const chatId = message.chat_id || '';
-  const senderId = message.sender?.sender_id?.open_id || '';
-  const messageId = message.message_id || '';
+  // 解析消息内容
+  let content: { text?: string } = {}
+  try {
+    content = JSON.parse(message.content || '{}')
+  } catch {
+    console.warn('[Webhook] 消息内容解析失败')
+    await feishuBot.sendTextMessage(chatId, '消息格式解析失败，请稍后重试。')
+    return
+  }
+
+  const text = content.text || ''
 
   // 检查是否是@Bot的消息
   const isMentioned = message.mentions?.some(
-    (m) => m.name.toLowerCase().includes('nps') || m.name.toLowerCase().includes('insight')
-  );
+    (m) =>
+      m.name.toLowerCase().includes('nps') ||
+      m.name.toLowerCase().includes('insight')
+  )
 
   // 清理文本（移除@提及）
-  const cleanText = text.replace(/@_user_\d+/g, '').trim();
+  const cleanText = text.replace(/@_user_\d+/g, '').trim()
 
-  // 解析命令
-  const command = parseCommand(text);
+  // 解析命令（使用清理后的文本）
+  const command = parseCommand(cleanText)
 
   // 如果是 /nps 命令，走命令处理逻辑
   if (command) {
-    command.chatId = chatId;
-    command.senderId = senderId;
-    command.messageId = messageId;
-    await executeCommand(command);
-    return;
+    command.chatId = chatId
+    command.senderId = senderId
+    command.messageId = messageId
+    await executeCommand(command)
+    return
   }
 
   // 如果没@Bot且不是命令，忽略
-  if (!isMentioned) return;
+  if (!isMentioned) return
+
+  // 如果 cleanText 为空（比如只 @ 了 Bot 但没输入文字），忽略
+  if (!cleanText) return
 
   // @Bot 但没有 /nps 命令 → 走自然语言问答
-  console.log(`[Webhook] 收到@Bot消息，进入问答模式: ${cleanText}`);
+  console.log(`[Webhook] 收到@Bot消息，进入问答模式: ${cleanText}`)
 
   try {
     // 发送"正在思考"提示
-    await feishuBot.sendTextMessage(chatId, '🤔 正在查询数据，请稍候...');
+    await feishuBot.sendTextMessage(chatId, '🤔 正在查询数据，请稍候...')
 
     // 调用问答引擎
     const answer = await handleQuestion(cleanText, {
       chatId,
       senderId,
-      messageId,
-    });
+      messageId
+    })
 
     // 发送回答
-    await feishuBot.sendTextMessage(chatId, answer);
+    await feishuBot.sendTextMessage(chatId, answer)
   } catch (error) {
-    console.error('[Webhook] 问答处理失败', error);
+    console.error('[Webhook] 问答处理失败', error)
     await feishuBot.sendTextMessage(
       chatId,
       '抱歉，处理您的问题时出错了😅\n请稍后再试，或联系管理员。'
-    );
+    )
   }
 }
 

@@ -153,9 +153,11 @@ async function fetchFeedbacks(): Promise<Feedback[]> {
     });
 
     if (response.ok) {
-      const data = await response.json();
-      if (data.feedbacks && Array.isArray(data.feedbacks)) {
-        return data.feedbacks.map((f: unknown) => normalizeFeedback(f));
+      const result = await response.json()
+      // Mock API 返回结构: { code: 0, data: { list: [...], total: ... } }
+      const feedbacks = result.data?.list || result.data?.feedbacks || []
+      if (Array.isArray(feedbacks)) {
+        return feedbacks.map((f: unknown) => normalizeFeedback(f))
       }
     }
   } catch (error) {

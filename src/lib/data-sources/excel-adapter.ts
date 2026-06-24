@@ -7,7 +7,8 @@ import {
   FeedbackRecord,
   FieldMapping,
   DEFAULT_FIELD_MAPPING,
-} from './base-adapter';
+  extractFieldValue
+} from './base-adapter'
 
 export interface ExcelAdapterConfig {
   type: 'excel';
@@ -68,44 +69,66 @@ export class ExcelAdapter implements DataSourceAdapter {
 
     // 解析数据
     const feedbacks: FeedbackRecord[] = rawData.map((row: any, index: number) => {
+      // 使用 extractFieldValue 统一处理字段值提取
+      // 该函数会尝试 mapping 中定义的所有可能字段名
       const feedbackId =
-        row[mapping.feedbackId as string] ||
-        row['id'] ||
-        row['编号'] ||
-        `EXCEL-${index + 1}`;
+        extractFieldValue(
+          row,
+          mapping.feedbackId || DEFAULT_FIELD_MAPPING.feedbackId
+        ) || `EXCEL-${index + 1}`
       const content =
-        row[mapping.content as string] ||
-        row['content'] ||
-        row['评价内容'] ||
-        row['反馈内容'] ||
-        '';
+        extractFieldValue(
+          row,
+          mapping.content || DEFAULT_FIELD_MAPPING.content
+        ) || ''
       const score = Number(
-        row[mapping.score as string] ||
-          row['score'] ||
-          row['评分'] ||
+        extractFieldValue(row, mapping.score || DEFAULT_FIELD_MAPPING.score) ||
           0
-      );
+      )
       const createTime =
-        row[mapping.createTime as string] ||
-        row['create_time'] ||
-        row['评价时间'] ||
-        row['提交时间'] ||
-        new Date().toISOString();
+        extractFieldValue(
+          row,
+          mapping.createTime || DEFAULT_FIELD_MAPPING.createTime
+        ) || new Date().toISOString()
 
       return {
         feedbackId: String(feedbackId),
         content: String(content),
         score,
-        createTime: typeof createTime === 'string' ? createTime : new Date(createTime).toISOString(),
-        module: row[mapping.module as string] || row['module'] || row['功能模块'],
-        source: row[mapping.source as string] || row['source'] || row['来源'],
-        dissatisfactionReason:
-          row[mapping.dissatisfactionReason as string] || row['reason'] || row['不满意原因'],
-        tenantId: row[mapping.tenantId as string] || row['tenant_id'] || row['租户ID'],
-        tenantName: row[mapping.tenantName as string] || row['tenant_name'] || row['租户名称'],
-        tenantScale: row[mapping.tenantScale as string] || row['tenant_scale'] || row['租户规模'],
-        larkUserId: row[mapping.larkUserId as string] || row['user_id'],
-      };
+        createTime:
+          typeof createTime === 'string'
+            ? createTime
+            : new Date(createTime).toISOString(),
+        module: extractFieldValue(
+          row,
+          mapping.module || DEFAULT_FIELD_MAPPING.module
+        ),
+        source: extractFieldValue(
+          row,
+          mapping.source || DEFAULT_FIELD_MAPPING.source
+        ),
+        dissatisfactionReason: extractFieldValue(
+          row,
+          mapping.dissatisfactionReason ||
+            DEFAULT_FIELD_MAPPING.dissatisfactionReason
+        ),
+        tenantId: extractFieldValue(
+          row,
+          mapping.tenantId || DEFAULT_FIELD_MAPPING.tenantId
+        ),
+        tenantName: extractFieldValue(
+          row,
+          mapping.tenantName || DEFAULT_FIELD_MAPPING.tenantName
+        ),
+        tenantScale: extractFieldValue(
+          row,
+          mapping.tenantScale || DEFAULT_FIELD_MAPPING.tenantScale
+        ),
+        larkUserId: extractFieldValue(
+          row,
+          mapping.larkUserId || DEFAULT_FIELD_MAPPING.larkUserId
+        )
+      }
     });
 
     // 按时间范围过滤

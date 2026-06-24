@@ -73,39 +73,65 @@ export const TENANT_SCALE_OPTIONS = [
 export async function createNPSInsightBitable(
   name: string = 'NPS Insight - 反馈分析'
 ): Promise<BitableInfo> {
-  const token = await getTenantAccessToken();
+  const token = await getTenantAccessToken()
 
   // 1. 创建多维表格应用
-  const appResponse = await fetch('https://open.feishu.cn/open-apis/bitable/v1/apps', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ name }),
-  });
+  const appResponse = await fetch(
+    'https://open.feishu.cn/open-apis/bitable/v1/apps',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ name })
+    }
+  )
 
-  const appData = await appResponse.json();
+  const appData = await appResponse.json()
+  console.log('[创建表格] 应用创建响应:', JSON.stringify(appData))
   if (appData.code !== 0) {
-    throw new Error(`创建多维表格失败: ${appData.msg}`);
+    throw new Error(`创建多维表格失败: ${appData.msg}`)
   }
 
-  const appToken = appData.data?.app?.app_token;
+  const appToken = appData.data?.app?.app_token
+  console.log('[创建表格] 应用创建成功，appToken:', appToken)
 
-  // 2. 先创建三张标签表（供反馈表关联使用，需串行创建因存在关联依赖）
-  const tag1TableId = await createTag1Table(token, appToken);
-  const tag2TableId = await createTag2Table(token, appToken, tag1TableId);
-  const tag3TableId = await createTag3Table(token, appToken, tag2TableId);
+  // 等待应用完全初始化（飞书API创建应用后有同步延迟）
+  console.log('[创建表格] 等待应用初始化...')
+  await new Promise((resolve) => setTimeout(resolve, 3000))
 
-  // 3. 创建其他表（反馈表需要引用标签表ID，周期分析表需要引用Tag2/Tag3）
-  const [feedbackTableId, tenantTableId, periodTableId] = await Promise.all([
-    createFeedbackListTable(token, appToken, tag1TableId, tag2TableId, tag3TableId),
-    createTenantInfoTable(token, appToken),
-    createPeriodAnalysisTable(token, appToken, tag2TableId, tag3TableId),
-  ]);
+  // 2. 创建所有基础表（不带关联字段）
+  const [
+    tag1TableId,
+    tag2TableId,
+    tag3TableId,
+    feedbackTableId,
+    tenantTableId,
+    periodTableId
+  ] = await Promise.all([
+    createTag1TableWithRetry(token, appToken),
+    createTag2TableWithRetry(token, appToken),
+    createTag3TableWithRetry(token, appToken),
+    createFeedbackListTableWithRetry(token, appToken),
+    createTenantInfoTableWithRetry(token, appToken),
+    createPeriodAnalysisTableWithRetry(token, appToken)
+  ])
+
+  // 3. 添加关联字段（在所有表创建完成后）
+  console.log('[创建表格] 添加关联字段...')
+  await addRelationFields(
+    token,
+    appToken,
+    tag1TableId,
+    tag2TableId,
+    tag3TableId,
+    feedbackTableId,
+    periodTableId
+  )
 
   // 4. 为标签表添加公式字段（需在所有表创建完成后执行）
-  await addTagTableFormulas(token, appToken, feedbackTableId);
+  await addTagTableFormulas(token, appToken, feedbackTableId)
 
   return {
     appToken,
@@ -115,9 +141,67 @@ export async function createNPSInsightBitable(
       tag2TableId,
       tag3TableId,
       tenantTableId,
-      periodTableId,
-    },
-  };
+      periodTableId
+    }
+  }
+}
+
+/**
+ * 添加关联字段（在所有表创建完成后执行）
+ * 飞书API要求关联字段必须在目标表存在后才能创建
+ */
+async function addRelationFields(
+  token: string,
+  appToken: string,
+  tag1TableId: string,
+  tag2TableId: string,
+  tag3TableId: string,
+  feedbackTableId: string,
+  periodTableId: string
+): Promise<void> {
+  const addField = async (
+    tableId: string,
+    fieldName: string,
+    foreignTableId: string,
+    multiple: boolean = false
+  ) => {
+    console.log(`[关联字段] 添加 ${fieldName} -> ${foreignTableId}`)
+    const response = await fetch(
+      `${BITABLE_API_BASE}/apps/${appToken}/tables/${tableId}/fields`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          field_name: fieldName,
+          type: 16,
+          property: {
+            foreign_table_id: foreignTableId,
+            multiple
+          }
+        })
+      }
+    )
+
+    const data = await response.json()
+    if (data.code !== 0) {
+      console.warn(`[关联字段] 添加失败 [${fieldName}]: ${data.msg}`)
+    } else {
+      console.log(`[关联字段] 添加成功: ${fieldName}`)
+    }
+  }
+
+  await Promise.all([
+    addField(tag2TableId, '所属一级标签', tag1TableId),
+    addField(tag3TableId, '所属二级标签', tag2TableId),
+    addField(feedbackTableId, 'Tag1', tag1TableId, true),
+    addField(feedbackTableId, 'Tag2', tag2TableId, true),
+    addField(feedbackTableId, 'Tag3', tag3TableId, true),
+    addField(periodTableId, '所属模块', tag2TableId),
+    addField(periodTableId, '具体问题', tag3TableId, true)
+  ])
 }
 
 /**
@@ -129,80 +213,108 @@ async function addTagTableFormulas(
   appToken: string,
   feedbackTableId: string
 ): Promise<void> {
-  // 获取反馈表的字段列表，找到 tag1/tag2/tag3 关联字段的 field_id
   const feedbackFieldsResponse = await fetch(
     `${BITABLE_API_BASE}/apps/${appToken}/tables/${feedbackTableId}/fields`,
     {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+        Authorization: `Bearer ${token}`
+      }
     }
-  );
-  const feedbackFieldsData = await feedbackFieldsResponse.json();
+  )
+  const feedbackFieldsData = await feedbackFieldsResponse.json()
   if (feedbackFieldsData.code !== 0) {
-    console.warn(`[公式] 获取反馈表字段失败，跳过公式配置: ${feedbackFieldsData.msg}`);
-    return;
+    console.warn(
+      `[公式] 获取反馈表字段失败，跳过公式配置: ${feedbackFieldsData.msg}`
+    )
+    return
   }
 
-  const fieldMap: Record<string, string> = {};
+  const fieldMap: Record<string, string> = {}
   for (const item of feedbackFieldsData.data?.items || []) {
-    const name = item.field_name || '';
-    if (name === 'tag1') fieldMap.tag1 = item.field_id || '';
-    else if (name === 'tag2') fieldMap.tag2 = item.field_id || '';
-    else if (name === 'tag3') fieldMap.tag3 = item.field_id || '';
+    const name = item.field_name || ''
+    if (name === 'Tag1') fieldMap.tag1 = item.field_id || ''
+    else if (name === 'Tag2') fieldMap.tag2 = item.field_id || ''
+    else if (name === 'Tag3') fieldMap.tag3 = item.field_id || ''
   }
 
-  // 公式字段类型: 15
-  const FORMULA_TYPE = 15;
+  const FORMULA_TYPE = 15
 
-  // 为 Tag1 表添加公式字段
-  await addFormulaField(token, appToken, 'Tag1表', '使用次数', FORMULA_TYPE, {
-    formula: `COUNTA(关联(反馈列表.${fieldMap.tag1 || 'tag1'}))`,
-  });
-  await addFormulaField(token, appToken, 'Tag1表', '大租户数', FORMULA_TYPE, {
-    formula: `COUNTA(FILTER(关联(反馈列表.${fieldMap.tag1 || 'tag1'}), 反馈列表.租户规模 IN ["A4", "A5", "A6"]))`,
-  });
+  // Tag1表公式字段
+  await addFormulaField(token, appToken, 'Tag1表', '总使用次数', FORMULA_TYPE, {
+    formula: `COUNTA(关联(反馈列表.${fieldMap.tag1 || 'Tag1'}))`
+  })
+  await addFormulaField(
+    token,
+    appToken,
+    'Tag1表',
+    '大租户使用次数',
+    FORMULA_TYPE,
+    {
+      formula: `COUNTA(FILTER(关联(反馈列表.${fieldMap.tag1 || 'Tag1'}), 反馈列表.租户规模 IN ["A4", "A5", "A6"]))`
+    }
+  )
   await addFormulaField(token, appToken, 'Tag1表', '大租户占比', FORMULA_TYPE, {
-    formula: `IF(使用次数 > 0, 大租户数 / 使用次数, 0)`,
-  });
-  await addFormulaField(token, appToken, 'Tag1表', '平均分', FORMULA_TYPE, {
-    formula: `AVERAGE(关联(反馈列表.${fieldMap.tag1 || 'tag1'}).评分)`,
-  });
+    formula: `IF(总使用次数 > 0, 大租户使用次数 / 总使用次数, 0)`
+  })
+  await addFormulaField(token, appToken, 'Tag1表', '平均评分', FORMULA_TYPE, {
+    formula: `AVERAGE(关联(反馈列表.${fieldMap.tag1 || 'Tag1'}).评分)`
+  })
 
-  // 为 Tag2 表添加公式字段
-  await addFormulaField(token, appToken, 'Tag2表', '使用次数', FORMULA_TYPE, {
-    formula: `COUNTA(关联(反馈列表.${fieldMap.tag2 || 'tag2'}))`,
-  });
-  await addFormulaField(token, appToken, 'Tag2表', '大租户数', FORMULA_TYPE, {
-    formula: `COUNTA(FILTER(关联(反馈列表.${fieldMap.tag2 || 'tag2'}), 反馈列表.租户规模 IN ["A4", "A5", "A6"]))`,
-  });
+  // Tag2表公式字段
+  await addFormulaField(token, appToken, 'Tag2表', '总使用次数', FORMULA_TYPE, {
+    formula: `COUNTA(关联(反馈列表.${fieldMap.tag2 || 'Tag2'}))`
+  })
+  await addFormulaField(
+    token,
+    appToken,
+    'Tag2表',
+    '大租户使用次数',
+    FORMULA_TYPE,
+    {
+      formula: `COUNTA(FILTER(关联(反馈列表.${fieldMap.tag2 || 'Tag2'}), 反馈列表.租户规模 IN ["A4", "A5", "A6"]))`
+    }
+  )
   await addFormulaField(token, appToken, 'Tag2表', '大租户占比', FORMULA_TYPE, {
-    formula: `IF(使用次数 > 0, 大租户数 / 使用次数, 0)`,
-  });
-  await addFormulaField(token, appToken, 'Tag2表', '平均分', FORMULA_TYPE, {
-    formula: `AVERAGE(关联(反馈列表.${fieldMap.tag2 || 'tag2'}).评分)`,
-  });
-  await addFormulaField(token, appToken, 'Tag2表', 'Tag3数量', FORMULA_TYPE, {
-    formula: `COUNTA(关联(Tag3表.所属二级标签))`,
-  });
+    formula: `IF(总使用次数 > 0, 大租户使用次数 / 总使用次数, 0)`
+  })
+  await addFormulaField(token, appToken, 'Tag2表', '平均评分', FORMULA_TYPE, {
+    formula: `AVERAGE(关联(反馈列表.${fieldMap.tag2 || 'Tag2'}).评分)`
+  })
+  await addFormulaField(
+    token,
+    appToken,
+    'Tag2表',
+    '下级 Tag3 数量',
+    FORMULA_TYPE,
+    {
+      formula: `COUNTA(关联(Tag3表.所属二级标签))`
+    }
+  )
 
-  // 为 Tag3 表添加公式字段
-  await addFormulaField(token, appToken, 'Tag3表', '使用次数', FORMULA_TYPE, {
-    formula: `COUNTA(关联(反馈列表.${fieldMap.tag3 || 'tag3'}))`,
-  });
-  await addFormulaField(token, appToken, 'Tag3表', '大租户数', FORMULA_TYPE, {
-    formula: `COUNTA(FILTER(关联(反馈列表.${fieldMap.tag3 || 'tag3'}), 反馈列表.租户规模 IN ["A4", "A5", "A6"]))`,
-  });
+  // Tag3表公式字段
+  await addFormulaField(token, appToken, 'Tag3表', '总使用次数', FORMULA_TYPE, {
+    formula: `COUNTA(关联(反馈列表.${fieldMap.tag3 || 'Tag3'}))`
+  })
+  await addFormulaField(
+    token,
+    appToken,
+    'Tag3表',
+    '大租户使用次数',
+    FORMULA_TYPE,
+    {
+      formula: `COUNTA(FILTER(关联(反馈列表.${fieldMap.tag3 || 'Tag3'}), 反馈列表.租户规模 IN ["A4", "A5", "A6"]))`
+    }
+  )
   await addFormulaField(token, appToken, 'Tag3表', '大租户占比', FORMULA_TYPE, {
-    formula: `IF(使用次数 > 0, 大租户数 / 使用次数, 0)`,
-  });
-  await addFormulaField(token, appToken, 'Tag3表', '平均分', FORMULA_TYPE, {
-    formula: `AVERAGE(关联(反馈列表.${fieldMap.tag3 || 'tag3'}).评分)`,
-  });
+    formula: `IF(总使用次数 > 0, 大租户使用次数 / 总使用次数, 0)`
+  })
+  await addFormulaField(token, appToken, 'Tag3表', '平均评分', FORMULA_TYPE, {
+    formula: `AVERAGE(关联(反馈列表.${fieldMap.tag3 || 'Tag3'}).评分)`
+  })
 
-  console.log('[公式] 标签表公式字段配置完成');
+  console.log('[公式] 标签表公式字段配置完成')
 }
 
 /**
@@ -279,128 +391,102 @@ async function addFormulaField(
   }
 }
 
+const DISSATISFACTION_REASON_OPTIONS = [
+  { name: '系统卡顿', color: 0 },
+  { name: '界面不美观', color: 1 },
+  { name: '功能缺失', color: 2 },
+  { name: '打开速度慢', color: 3 },
+  { name: '其他', color: 4 },
+  { name: '缺少功能', color: 5 }
+]
+
 /**
  * 创建「反馈列表」表
- * tag1/tag2/tag3 字段为双向关联字段，关联到对应的标签表
- * PRD v2 字段名：content → 反馈原文，source → 反馈平台
+ * PRD v2 字段名对齐：使用中文字段名，关联字段后续添加
  */
 async function createFeedbackListTable(
   token: string,
-  appToken: string,
-  tag1TableId: string,
-  tag2TableId: string,
-  tag3TableId: string
+  appToken: string
 ): Promise<string> {
   const response = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/tables`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${token}`
     },
     body: JSON.stringify({
       table: {
         name: '反馈列表',
         default_view_name: '默认视图',
         fields: [
-          { field_name: 'feedbackId', type: 1 },
-          { field_name: 'tenantId', type: 1 },
-          { field_name: 'tenantName', type: 1 },
+          { field_name: '反馈ID', type: 1 },
+          { field_name: '租户ID', type: 1 },
+          { field_name: '租户名称', type: 1 },
           {
-            field_name: 'tenantScale',
+            field_name: '租户规模',
             type: 3,
-            property: { options: TENANT_SCALE_OPTIONS },
+            property: { options: TENANT_SCALE_OPTIONS }
           },
-          { field_name: 'userId', type: 1 },
-          { field_name: 'userName', type: 1 },
-          { field_name: 'createTime', type: 5 },
+          { field_name: '用户ID', type: 1 },
+          { field_name: '用户名称', type: 1 },
+          { field_name: '创建时间', type: 5 },
           {
-            field_name: 'module',
+            field_name: '不满意原因',
             type: 4,
-            property: { options: MODULE_OPTIONS },
+            property: { options: DISSATISFACTION_REASON_OPTIONS }
           },
-          // PRD v2: content → 反馈原文
           { field_name: '反馈原文', type: 1 },
-          { field_name: 'npsScore', type: 2 },
-          // PRD v2: source → 反馈平台
+          { field_name: '翻译后文本', type: 1 },
+          { field_name: '评分', type: 2 },
           { field_name: '反馈平台', type: 1 },
+          { field_name: 'AI 置信度', type: 2 },
+          { field_name: '需查日志', type: 7 },
+          { field_name: '待审核', type: 7 },
           {
-            field_name: 'tag1',
-            type: 16,
-            property: { foreign_table_id: tag1TableId },
-          },
-          {
-            field_name: 'tag2',
-            type: 16,
-            property: { foreign_table_id: tag2TableId },
-          },
-          {
-            field_name: 'tag3',
-            type: 16,
-            property: { foreign_table_id: tag3TableId },
-          },
-          { field_name: 'summary', type: 1 },
-          { field_name: 'suggestions', type: 1 },
-          {
-            field_name: 'priority',
+            field_name: '打标状态',
             type: 3,
-            property: { options: [{ name: 'urgent', color: 0 }, { name: 'high', color: 1 }, { name: 'medium', color: 2 }, { name: 'low', color: 3 }] },
-          },
-          {
-            field_name: 'status',
-            type: 3,
-            property: { options: [{ name: 'new', color: 0 }, { name: 'pending', color: 1 }, { name: 'processing', color: 2 }, { name: 'resolved', color: 3 }, { name: 'closed', color: 4 }] },
-          },
-          { field_name: 'assigneeId', type: 1 },
-        ],
-      },
-    }),
-  });
+            property: {
+              options: [
+                { name: '未打标', color: 0 },
+                { name: '已打标', color: 1 }
+              ]
+            }
+          }
+        ]
+      }
+    })
+  })
 
-  const data = await response.json();
+  const data = await response.json()
   if (data.code !== 0) {
-    throw new Error(`创建反馈列表表失败: ${data.msg}`);
+    throw new Error(`创建反馈列表表失败: ${data.msg}`)
   }
 
-  return data.data?.table_id;
+  return data.data?.table_id
 }
 
 /**
  * 创建「Tag1表」（一级标签表）
- * 字段：tagId、name、definition、usageCount、largeTenantCount、largeTenantRatio、status、createdBy、createdAt
+ * PRD v2 字段名对齐：使用中文字段名，公式字段后续单独添加
  */
 async function createTag1Table(token: string, appToken: string): Promise<string> {
   const response = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/tables`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${token}`
     },
     body: JSON.stringify({
       table: {
         name: 'Tag1表',
         fields: [
           { field_name: 'tagId', type: 1 },
-          { field_name: 'name', type: 1 },
-          { field_name: 'definition', type: 1 },
-          { field_name: 'usageCount', type: 2 },
-          { field_name: 'largeTenantCount', type: 2 },
-          { field_name: 'largeTenantRatio', type: 2 },
-          {
-            field_name: 'status',
-            type: 3,
-            property: {
-              options: [
-                { name: 'active', color: 0 },
-                { name: 'inactive', color: 1 },
-              ],
-            },
-          },
-          { field_name: 'createdBy', type: 1 },
-          { field_name: 'createdAt', type: 5 },
-        ],
-      },
-    }),
-  });
+          { field_name: '标签名称', type: 1 },
+          { field_name: '定义说明', type: 1 }
+        ]
+      }
+    })
+  })
 
   const data = await response.json();
   if (data.code !== 0) {
@@ -412,128 +498,102 @@ async function createTag1Table(token: string, appToken: string): Promise<string>
 
 /**
  * 创建「Tag2表」（二级标签表）
- * 字段：tagId、name、definition、所属一级标签(关联Tag1)、usageCount、largeTenantCount、largeTenantRatio、status、createdBy、createdAt
+ * PRD v2 字段名对齐：使用中文字段名，关联字段和公式字段后续单独添加
  */
-async function createTag2Table(token: string, appToken: string, tag1TableId: string): Promise<string> {
+async function createTag2Table(
+  token: string,
+  appToken: string
+): Promise<string> {
   const response = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/tables`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${token}`
     },
     body: JSON.stringify({
       table: {
         name: 'Tag2表',
         fields: [
           { field_name: 'tagId', type: 1 },
-          { field_name: 'name', type: 1 },
-          { field_name: '所属一级标签', type: 16, property: { foreign_table_id: tag1TableId } },
-          { field_name: 'definition', type: 1 },
-          { field_name: 'usageCount', type: 2 },
-          { field_name: 'largeTenantCount', type: 2 },
-          { field_name: 'largeTenantRatio', type: 2 },
-          {
-            field_name: 'status',
-            type: 3,
-            property: {
-              options: [
-                { name: 'active', color: 0 },
-                { name: 'inactive', color: 1 },
-              ],
-            },
-          },
-          { field_name: 'createdBy', type: 1 },
-          { field_name: 'createdAt', type: 5 },
-        ],
-      },
-    }),
-  });
+          { field_name: '标签名称', type: 1 }
+        ]
+      }
+    })
+  })
 
-  const data = await response.json();
+  const data = await response.json()
   if (data.code !== 0) {
-    throw new Error(`创建Tag2表失败: ${data.msg}`);
+    throw new Error(`创建Tag2表失败: ${data.msg}`)
   }
 
-  return data.data?.table_id;
+  return data.data?.table_id
 }
 
 /**
  * 创建「Tag3表」（三级标签表）
- * 字段：tagId、name、所属二级标签(关联Tag2)、definition、usageCount、largeTenantCount、largeTenantRatio、status、createdBy、createdAt
- * status 选项包含"待确认"
+ * PRD v2 字段名对齐：使用中文字段名，关联字段和公式字段后续单独添加
  */
-async function createTag3Table(token: string, appToken: string, tag2TableId: string): Promise<string> {
+async function createTag3Table(
+  token: string,
+  appToken: string
+): Promise<string> {
   const response = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/tables`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${token}`
     },
     body: JSON.stringify({
       table: {
         name: 'Tag3表',
         fields: [
           { field_name: 'tagId', type: 1 },
-          { field_name: 'name', type: 1 },
-          { field_name: '所属二级标签', type: 16, property: { foreign_table_id: tag2TableId } },
-          { field_name: 'definition', type: 1 },
-          { field_name: 'usageCount', type: 2 },
-          { field_name: 'largeTenantCount', type: 2 },
-          { field_name: 'largeTenantRatio', type: 2 },
-          {
-            field_name: 'status',
-            type: 3,
-            property: {
-              options: [
-                { name: 'active', color: 0 },
-                { name: 'inactive', color: 1 },
-                { name: '待确认', color: 2 },
-              ],
-            },
-          },
-          { field_name: 'createdBy', type: 1 },
-          { field_name: 'createdAt', type: 5 },
-        ],
-      },
-    }),
-  });
+          { field_name: '标签名称', type: 1 }
+        ]
+      }
+    })
+  })
 
-  const data = await response.json();
+  const data = await response.json()
   if (data.code !== 0) {
-    throw new Error(`创建Tag3表失败: ${data.msg}`);
+    throw new Error(`创建Tag3表失败: ${data.msg}`)
   }
 
-  return data.data?.table_id;
+  return data.data?.table_id
 }
 
 /**
  * 创建「租户信息」表
+ * PRD v2 字段名对齐：使用中文字段名
  */
 async function createTenantInfoTable(token: string, appToken: string): Promise<string> {
   const response = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/tables`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${token}`
     },
     body: JSON.stringify({
       table: {
         name: '租户信息',
         fields: [
-          { field_name: 'tenantId', type: 1 },
-          { field_name: 'tenantName', type: 1 },
+          { field_name: '租户ID', type: 1 },
+          { field_name: '租户名称', type: 1 },
           {
-            field_name: 'scale',
+            field_name: '规模',
             type: 3,
-            property: { options: TENANT_SCALE_OPTIONS },
+            property: { options: TENANT_SCALE_OPTIONS }
           },
-          { field_name: 'contact', type: 1 },
-          { field_name: 'industry', type: 1 },
-          { field_name: 'address', type: 1 },
-        ],
-      },
-    }),
-  });
+          { field_name: '是否企业版', type: 7 },
+          { field_name: '联系人', type: 1 },
+          { field_name: '联系邮箱', type: 1 },
+          { field_name: '日志平台', type: 1 },
+          { field_name: '日志端点', type: 1 },
+          { field_name: '创建时间', type: 5 }
+        ]
+      }
+    })
+  })
 
   const data = await response.json();
   if (data.code !== 0) {
@@ -549,15 +609,13 @@ async function createTenantInfoTable(token: string, appToken: string): Promise<s
  */
 async function createPeriodAnalysisTable(
   token: string,
-  appToken: string,
-  tag2TableId: string,
-  tag3TableId: string
+  appToken: string
 ): Promise<string> {
   const response = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/tables`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${token}`
     },
     body: JSON.stringify({
       table: {
@@ -570,21 +628,8 @@ async function createPeriodAnalysisTable(
           { field_name: 'endDate', type: 5 },
           { field_name: 'totalFeedbacks', type: 2 },
           { field_name: 'avgScore', type: 2 },
-          // 所属模块：关联引用 Tag2 表（单选）
-          {
-            field_name: '所属模块',
-            type: 16,
-            property: { foreign_table_id: tag2TableId },
-          },
-          // 具体问题：关联引用 Tag3 表（多选）
-          {
-            field_name: '具体问题',
-            type: 16,
-            property: {
-              foreign_table_id: tag3TableId,
-              multiple: true,
-            },
-          },
+          { field_name: '所属模块', type: 1 },
+          { field_name: '具体问题', type: 1 },
           { field_name: '问题标识', type: 1 },
           { field_name: '总反馈数', type: 2 },
           { field_name: '本周期新增', type: 2 },
@@ -605,9 +650,9 @@ async function createPeriodAnalysisTable(
                 { name: '待讨论', color: 0 },
                 { name: '已排期', color: 1 },
                 { name: '已上线', color: 2 },
-                { name: '验证中', color: 3 },
-              ],
-            },
+                { name: '验证中', color: 3 }
+              ]
+            }
           },
           {
             field_name: '迭代周期',
@@ -617,21 +662,21 @@ async function createPeriodAnalysisTable(
                 { name: 'Sprint 1', color: 0 },
                 { name: 'Sprint 2', color: 1 },
                 { name: 'Sprint 3+', color: 2 },
-                { name: '待定', color: 3 },
-              ],
-            },
-          },
-        ],
-      },
-    }),
-  });
+                { name: '待定', color: 3 }
+              ]
+            }
+          }
+        ]
+      }
+    })
+  })
 
-  const data = await response.json();
+  const data = await response.json()
   if (data.code !== 0) {
-    throw new Error(`创建周期分析表失败: ${data.msg}`);
+    throw new Error(`创建周期分析表失败: ${data.msg}`)
   }
 
-  return data.data?.table_id;
+  return data.data?.table_id
 }
 
 /**
@@ -835,4 +880,101 @@ export async function addMissingFields(
       body: JSON.stringify(fieldConfig),
     });
   }
+}
+
+/**
+ * 根据表名查询已存在的表ID
+ */
+async function findTableByName(token: string, appToken: string, tableName: string): Promise<string | null> {
+  try {
+    const response = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/tables`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const data = await response.json();
+    if (data.code === 0 && data.data?.items) {
+      const table = data.data.items.find((item: any) => item.name === tableName);
+      if (table) {
+        console.log(`[创建表格] 找到已存在的表 ${tableName}: ${table.table_id}`);
+        return table.table_id;
+      }
+    }
+  } catch (error) {
+    console.warn(`[创建表格] 查询表失败: ${error}`);
+  }
+  return null;
+}
+
+/**
+ * 创建表的通用重试包装函数
+ */
+async function createTableWithRetry<T extends any[]>(
+  tableName: string,
+  createFn: (...args: T) => Promise<string>,
+  ...args: T
+): Promise<string> {
+  const maxRetries = 5;
+  const delayMs = 2000;
+
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      console.log(`[创建表格] 创建${tableName}...`);
+      const tableId = await createFn(...args);
+      console.log(`[创建表格] ${tableName}创建成功: ${tableId}`);
+      return tableId;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+
+      if (errorMsg.includes('TableNameDuplicated')) {
+        console.log(`[创建表格] 表 ${tableName} 已存在，尝试查询...`);
+        const token = args[0] as string;
+        const appToken = args[1] as string;
+        const existingTableId = await findTableByName(token, appToken, tableName);
+        if (existingTableId) {
+          console.log(`[创建表格] 使用已存在的表 ${tableName}: ${existingTableId}`);
+          return existingTableId;
+        }
+      }
+
+      if (i < maxRetries - 1) {
+        console.warn(`[创建表格] ${tableName}创建失败，重试 ${i + 1}/${maxRetries}: ${errorMsg}`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      } else {
+        throw new Error(`创建${tableName}失败: ${errorMsg}`);
+      }
+    }
+  }
+
+  throw new Error(`创建${tableName}失败`);
+}
+
+/**
+ * 带重试的表创建函数
+ */
+async function createTag1TableWithRetry(token: string, appToken: string): Promise<string> {
+  return createTableWithRetry('Tag1表', createTag1Table, token, appToken);
+}
+
+async function createTag2TableWithRetry(token: string, appToken: string): Promise<string> {
+  return createTableWithRetry('Tag2表', createTag2Table, token, appToken);
+}
+
+async function createTag3TableWithRetry(token: string, appToken: string): Promise<string> {
+  return createTableWithRetry('Tag3表', createTag3Table, token, appToken);
+}
+
+async function createFeedbackListTableWithRetry(token: string, appToken: string): Promise<string> {
+  return createTableWithRetry('反馈列表', createFeedbackListTable, token, appToken);
+}
+
+async function createTenantInfoTableWithRetry(token: string, appToken: string): Promise<string> {
+  return createTableWithRetry('租户信息', createTenantInfoTable, token, appToken);
+}
+
+async function createPeriodAnalysisTableWithRetry(token: string, appToken: string): Promise<string> {
+  return createTableWithRetry('周期分析', createPeriodAnalysisTable, token, appToken);
 }
