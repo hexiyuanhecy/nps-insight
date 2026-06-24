@@ -1,23 +1,23 @@
 /**
- * 配置中心组件 v4
- * 三个 Tab：飞书与集成 / AI 模型与标签 / 任务与运营
+ * 配置中心组件 v5
+ * 三个 Tab：飞书配置 / 数据源 / 打标与分析配置
  */
 
 'use client';
 
-import { Bot, Clock, Loader2, Settings } from 'lucide-react';
-import { AiTagsTab } from '@/components/admin/config-center/AiTagsTab';
-import { IntegrationTab } from '@/components/admin/config-center/IntegrationTab';
-import { OpsTab } from '@/components/admin/config-center/OpsTab';
+import { Database, Loader2, Settings, Sparkles } from 'lucide-react';
+import { DatasourceTab } from '@/components/admin/config-center/DatasourceTab';
+import { FeishuTab } from '@/components/admin/config-center/FeishuTab';
+import { TaggingTab } from '@/components/admin/config-center/TaggingTab';
 import { useConfigCenter } from '@/components/admin/config-center/use-config-center';
 import { ToastStack } from '@/components/admin/config-center/ui';
 import type { ConfigTabKey } from '@/components/admin/config-center/types';
 import { CONFIG_TAB_META } from '@/constants/config-center';
 
 const TAB_ICONS: Record<ConfigTabKey, React.ReactNode> = {
-  integration: <Settings className="h-4 w-4" />,
-  ai: <Bot className="h-4 w-4" />,
-  ops: <Clock className="h-4 w-4" />,
+  feishu: <Settings className="h-4 w-4" />,
+  datasource: <Database className="h-4 w-4" />,
+  tagging: <Sparkles className="h-4 w-4" />,
 };
 
 export default function ConfigCenter() {
@@ -52,9 +52,9 @@ export default function ConfigCenter() {
         ))}
       </div>
 
-      {ctrl.activeTab === 'integration' && <IntegrationTab ctrl={ctrl} />}
-      {ctrl.activeTab === 'ai' && <AiTagsTab ctrl={ctrl} />}
-      {ctrl.activeTab === 'ops' && <OpsTab ctrl={ctrl} />}
+      {ctrl.activeTab === 'feishu' && <FeishuTab ctrl={ctrl} />}
+      {ctrl.activeTab === 'datasource' && <DatasourceTab ctrl={ctrl} />}
+      {ctrl.activeTab === 'tagging' && <TaggingTab ctrl={ctrl} />}
     </div>
   );
 }

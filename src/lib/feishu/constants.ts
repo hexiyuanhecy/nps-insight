@@ -36,28 +36,31 @@ export type TableName = typeof TABLE_NAMES[keyof typeof TABLE_NAMES];
 // 反馈表字段定义
 // ============================================
 
-/** 反馈表字段名 —— 与PRD v2 严格对应 */
+/** 反馈表字段名 —— 与实际飞书表格字段对应 */
 export const FEEDBACK_FIELDS = {
-  FEEDBACK_ID: '反馈ID',
-  TENANT_ID: '租户ID',
-  TENANT_NAME: '租户名称',
-  TENANT_SCALE: '租户规模',
-  USER_ID: '用户ID',
-  USER_NAME: '用户名称',
-  CREATE_TIME: '创建时间',
-  UNSATISFACTION_REASON: '不满意原因',
+  FEEDBACK_ID: 'feedbackId',
+  TENANT_ID: 'tenantId',
+  TENANT_NAME: 'tenantName',
+  TENANT_SCALE: 'tenantScale',
+  USER_ID: 'userId',
+  USER_NAME: 'userName',
+  CREATE_TIME: 'createTime',
+  UNSATISFACTION_REASON: 'module',
   CONTENT: '反馈原文',
-  TRANSLATED_CONTENT: '翻译内容',
-  NPS_SCORE: '评分',
+  TRANSLATED_CONTENT: 'translatedContent',
+  NPS_SCORE: 'npsScore',
   SOURCE: '反馈平台',
-  TAG1: 'Tag1',
-  TAG2: 'Tag2',
-  TAG3: 'Tag3',
-  CONFIDENCE: '置信度',
-  NEED_LOG_CHECK: '需要查日志',
-  REVIEW_NEEDED: '需要人工审核',
-  STATUS: '状态',
-  TAG_TIME: '打标时间',
+  TAG1: 'tag1',
+  TAG2: 'tag2',
+  TAG3: 'tag3',
+  CONFIDENCE: 'confidence',
+  NEED_LOG_CHECK: 'needLogCheck',
+  REVIEW_NEEDED: 'reviewNeeded',
+  STATUS: 'status',
+  TAG_TIME: 'tagTime',
+  SUMMARY: 'summary',
+  SUGGESTIONS: 'suggestions',
+  PRIORITY: 'priority',
 } as const;
 
 /** 反馈表字段定义（用于自动建表）—— 与PRD v6.0 严格对应 */

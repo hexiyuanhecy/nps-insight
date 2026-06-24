@@ -7,7 +7,7 @@
 import { chatCompletionJSON } from './index';
 import { generateBatchTaggingPrompt } from './prompts';
 import { bitableClient } from '@/lib/feishu/bitable';
-import { TABLE_NAMES, TAG_FIELDS, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
+import { TABLE_NAMES, TAG_FIELDS, FEEDBACK_FIELDS, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS } from '@/lib/feishu/constants';
 
 // ============================================
 // 类型定义
@@ -230,54 +230,143 @@ export async function completeTaggingProcess(
 /**
  * 确保标签存在于标签体系表中
  */
-async function ensureTagExists(
+export async function ensureTagExists(
   tag1Name: string | null,
   tag2Name: string | null,
   tag3Name: string | null,
   level: 'tag1' | 'tag2' | 'tag3'
 ): Promise<void> {
   const existing = await getAllTags();
-  const table = TABLE_NAMES.TAG1;
 
   if (level === 'tag1') {
     const found = existing.find(t => t.tag1Name === tag1Name);
     if (!found) {
-      await bitableClient.createRecord(table, {
-        [TAG_FIELDS.TAG_ID]: `tag1_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        [TAG_FIELDS.TAG1_NAME]: tag1Name!,
-        [TAG_FIELDS.USAGE_COUNT]: 1,
+      await bitableClient.createRecord(TABLE_NAMES.TAG1, {
+        [TAG1_FIELDS.TAG_ID]: `tag1_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        [TAG1_FIELDS.NAME]: tag1Name!,
+        [TAG1_FIELDS.USAGE_COUNT]: 1,
+        [TAG1_FIELDS.LARGE_TENANT_COUNT]: 0,
+        [TAG1_FIELDS.LARGE_TENANT_RATIO]: 0,
       });
+      invalidateTagCache();
     } else {
-      await bitableClient.updateRecord(table, found.recordId!, {
-        [TAG_FIELDS.USAGE_COUNT]: found.usageCount + 1,
+      await bitableClient.updateRecord(TABLE_NAMES.TAG1, found.recordId!, {
+        [TAG1_FIELDS.USAGE_COUNT]: found.usageCount + 1,
       });
+      invalidateTagCache();
     }
   } else if (level === 'tag2') {
     const found = existing.find(t => t.tag2Name === tag2Name);
     if (!found) {
-      await bitableClient.createRecord(table, {
-        [TAG_FIELDS.TAG_ID]: `tag2_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        [TAG_FIELDS.TAG2_NAME]: tag2Name!,
-        [TAG_FIELDS.USAGE_COUNT]: 1,
+      await bitableClient.createRecord(TABLE_NAMES.TAG2, {
+        [TAG2_FIELDS.TAG_ID]: `tag2_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        [TAG2_FIELDS.NAME]: tag2Name!,
+        [TAG2_FIELDS.USAGE_COUNT]: 1,
+        [TAG2_FIELDS.LARGE_TENANT_COUNT]: 0,
+        [TAG2_FIELDS.LARGE_TENANT_RATIO]: 0,
+        [TAG2_FIELDS.AVG_SCORE]: 0,
       });
+      invalidateTagCache();
     } else {
-      await bitableClient.updateRecord(table, found.recordId!, {
-        [TAG_FIELDS.USAGE_COUNT]: found.usageCount + 1,
+      await bitableClient.updateRecord(TABLE_NAMES.TAG2, found.recordId!, {
+        [TAG2_FIELDS.USAGE_COUNT]: found.usageCount + 1,
       });
+      invalidateTagCache();
     }
   } else {
     const found = existing.find(t => t.tag3Name === tag3Name);
     if (!found) {
-      await bitableClient.createRecord(table, {
-        [TAG_FIELDS.TAG_ID]: `tag3_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        [TAG_FIELDS.TAG3_NAME]: tag3Name!,
-        [TAG_FIELDS.USAGE_COUNT]: 1,
+      await bitableClient.createRecord(TABLE_NAMES.TAG3, {
+        [TAG3_FIELDS.TAG_ID]: `tag3_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        [TAG3_FIELDS.NAME]: tag3Name!,
+        [TAG3_FIELDS.USAGE_COUNT]: 1,
+        [TAG3_FIELDS.LARGE_TENANT_COUNT]: 0,
+        [TAG3_FIELDS.LARGE_TENANT_RATIO]: 0,
+        [TAG3_FIELDS.AVG_SCORE]: 0,
       });
+      invalidateTagCache();
     } else {
-      await bitableClient.updateRecord(table, found.recordId!, {
-        [TAG_FIELDS.USAGE_COUNT]: found.usageCount + 1,
+      await bitableClient.updateRecord(TABLE_NAMES.TAG3, found.recordId!, {
+        [TAG3_FIELDS.USAGE_COUNT]: found.usageCount + 1,
       });
+      invalidateTagCache();
     }
+  }
+}
+
+/**
+ * 更新标签统计字段（大租户数、大租户占比、平均分）
+ * @param tagName 标签名称
+ * @param level 标签级别（tag1/tag2/tag3）
+ * @param tenantScale 租户规模（如 A5）
+ * @param npsScore NPS 分数
+ */
+export async function updateTagStatistics(
+  tagName: string,
+  level: 'tag1' | 'tag2' | 'tag3',
+  tenantScale: string,
+  npsScore: number
+): Promise<void> {
+  const isLargeTenant = tenantScale === 'A5' || tenantScale === 'A6';
+
+  let tableName: string;
+  let nameField: string;
+  let usageCountField: string;
+  let largeTenantCountField: string;
+  let largeTenantRatioField: string;
+  let avgScoreField: string | null;
+
+  if (level === 'tag1') {
+    tableName = TABLE_NAMES.TAG1;
+    nameField = TAG1_FIELDS.NAME;
+    usageCountField = TAG1_FIELDS.USAGE_COUNT;
+    largeTenantCountField = TAG1_FIELDS.LARGE_TENANT_COUNT;
+    largeTenantRatioField = TAG1_FIELDS.LARGE_TENANT_RATIO;
+    avgScoreField = null;
+  } else if (level === 'tag2') {
+    tableName = TABLE_NAMES.TAG2;
+    nameField = TAG2_FIELDS.NAME;
+    usageCountField = TAG2_FIELDS.USAGE_COUNT;
+    largeTenantCountField = TAG2_FIELDS.LARGE_TENANT_COUNT;
+    largeTenantRatioField = TAG2_FIELDS.LARGE_TENANT_RATIO;
+    avgScoreField = TAG2_FIELDS.AVG_SCORE;
+  } else {
+    tableName = TABLE_NAMES.TAG3;
+    nameField = TAG3_FIELDS.NAME;
+    usageCountField = TAG3_FIELDS.USAGE_COUNT;
+    largeTenantCountField = TAG3_FIELDS.LARGE_TENANT_COUNT;
+    largeTenantRatioField = TAG3_FIELDS.LARGE_TENANT_RATIO;
+    avgScoreField = TAG3_FIELDS.AVG_SCORE;
+  }
+
+  try {
+    const records = await bitableClient.listRecords(tableName, { pageSize: 500 });
+    const found = records.find(r => String(r.fields[nameField] || '') === tagName);
+
+    if (!found) {
+      return;
+    }
+
+    const oldUsageCount = Number(found.fields[usageCountField] || 0);
+    const oldLargeTenantCount = Number(found.fields[largeTenantCountField] || 0);
+    const newUsageCount = oldUsageCount + 1;
+    const newLargeTenantCount = isLargeTenant ? oldLargeTenantCount + 1 : oldLargeTenantCount;
+    const newLargeTenantRatio = newUsageCount > 0 ? newLargeTenantCount / newUsageCount : 0;
+
+    const updateFields: Record<string, number> = {
+      [largeTenantCountField]: newLargeTenantCount,
+      [largeTenantRatioField]: Math.round(newLargeTenantRatio * 10000) / 10000,
+    };
+
+    if (avgScoreField) {
+      const oldAvgScore = Number(found.fields[avgScoreField] || 0);
+      const newAvgScore = (oldAvgScore * oldUsageCount + npsScore) / newUsageCount;
+      updateFields[avgScoreField] = Math.round(newAvgScore * 100) / 100;
+    }
+
+    await bitableClient.updateRecord(tableName, found.record_id, updateFields);
+  } catch (error) {
+    console.error(`[Tagger] 更新标签统计失败 [${level}] ${tagName}:`, error);
   }
 }
 
@@ -290,15 +379,43 @@ async function ensureTagExists(
  */
 export async function getAllTags(): Promise<TagRecord[]> {
   try {
-    const records = await bitableClient.listRecords(TABLE_NAMES.TAGS, { pageSize: 500 });
-    return records.map((record) => ({
-      tagId: String(record.fields[TAG_FIELDS.TAG_ID] || ''),
-      tag1Name: String(record.fields[TAG_FIELDS.TAG1_NAME] || ''),
-      tag2Name: String(record.fields[TAG_FIELDS.TAG2_NAME] || ''),
-      tag3Name: String(record.fields[TAG_FIELDS.TAG3_NAME] || ''),
-      usageCount: Number(record.fields[TAG_FIELDS.USAGE_COUNT] || 0),
+    const [tag1Records, tag2Records, tag3Records] = await Promise.all([
+      bitableClient.listRecords(TABLE_NAMES.TAG1, { pageSize: 500 }),
+      bitableClient.listRecords(TABLE_NAMES.TAG2, { pageSize: 500 }),
+      bitableClient.listRecords(TABLE_NAMES.TAG3, { pageSize: 500 }),
+    ]);
+
+    const tag1Mapped: TagRecord[] = tag1Records.map((record) => ({
+      tagId: String(record.fields[TAG1_FIELDS.TAG_ID] || ''),
+      tag1Name: String(record.fields[TAG1_FIELDS.NAME] || ''),
+      tag2Name: '',
+      tag3Name: '',
+      usageCount: Number(record.fields[TAG1_FIELDS.USAGE_COUNT] || 0),
       recordId: record.record_id,
+      table: 'tag1',
     }));
+
+    const tag2Mapped: TagRecord[] = tag2Records.map((record) => ({
+      tagId: String(record.fields[TAG2_FIELDS.TAG_ID] || ''),
+      tag1Name: '',
+      tag2Name: String(record.fields[TAG2_FIELDS.NAME] || ''),
+      tag3Name: '',
+      usageCount: Number(record.fields[TAG2_FIELDS.USAGE_COUNT] || 0),
+      recordId: record.record_id,
+      table: 'tag2',
+    }));
+
+    const tag3Mapped: TagRecord[] = tag3Records.map((record) => ({
+      tagId: String(record.fields[TAG3_FIELDS.TAG_ID] || ''),
+      tag1Name: '',
+      tag2Name: '',
+      tag3Name: String(record.fields[TAG3_FIELDS.NAME] || ''),
+      usageCount: Number(record.fields[TAG3_FIELDS.USAGE_COUNT] || 0),
+      recordId: record.record_id,
+      table: 'tag3',
+    }));
+
+    return [...tag1Mapped, ...tag2Mapped, ...tag3Mapped];
   } catch (error) {
     console.error('[Tagger] 获取标签失败', error);
     return [];
@@ -338,6 +455,8 @@ export const tagger = {
   analyzeFeedback,
   batchAnalyzeFeedbacks,
   completeTaggingProcess,
+  ensureTagExists,
+  updateTagStatistics,
   getAllTags,
   getCachedTags,
   invalidateTagCache,

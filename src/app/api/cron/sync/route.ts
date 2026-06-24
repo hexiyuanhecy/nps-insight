@@ -161,19 +161,13 @@ async function runSyncTask(): Promise<SyncResult> {
  * 单用户同步（使用环境变量，向后兼容）
  */
 async function runSyncTaskSingleUser(): Promise<SyncResult> {
-  const details: string[] = [];
-  let syncedCount = 0;
-  let failedCount = 0;
-
   try {
     // DEV_MODE: 开发阶段使用 Mock 数据
     if (process.env.CRON_DEV_MODE === 'true') {
       console.log('[Cron DEV] 开发模式：使用 Mock 数据');
       const mockResult = await runSyncWithMockData();
-      details.push(`[Mock] 同步了 ${mockResult.syncedCount} 条反馈`);
-      syncedCount += mockResult.syncedCount;
-      failedCount += mockResult.failedCount;
-      return { ...mockResult, details };
+      console.log(`[Cron DEV] Mock 结果: synced=${mockResult.syncedCount}, failed=${mockResult.failedCount}`);
+      return mockResult;
     }
 
     // 非 DEV_MODE 下增加超时保护（60s）
@@ -185,6 +179,11 @@ async function runSyncTaskSingleUser(): Promise<SyncResult> {
         ),
       ]);
     };
+
+    // 非 DEV_MODE 的变量初始化
+    const details: string[] = [];
+    let syncedCount = 0;
+    let failedCount = 0;
 
     // 步骤1：拉取外部数据（多数据源适配器）
     const externalDataResult = await withTimeout(syncExternalData(), 30000, 'syncExternalData');
@@ -379,7 +378,7 @@ async function syncExternalData(): Promise<number> {
         [FEEDBACK_FIELDS.TENANT_NAME]: tenantNameMap.get(f.tenantId ?? '') || f.tenantName || '',
         [FEEDBACK_FIELDS.TENANT_SCALE]: f.tenantScale || '',
         [FEEDBACK_FIELDS.USER_ID]: f.larkUserId || '',
-        [FEEDBACK_FIELDS.STATUS]: '未打标',
+        [FEEDBACK_FIELDS.STATUS]: 'new',
       },
     }));
 
@@ -399,24 +398,23 @@ async function syncExternalData(): Promise<number> {
  */
 async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
   try {
-    const filter = JSON.stringify({
-      conjunction: 'and',
-      conditions: [
-        { field_name: FEEDBACK_FIELDS.STATUS, operator: 'is', value: ['未打标'] },
-      ],
-    });
-
+    // 获取所有记录（飞书 filter API 格式问题，改为代码过滤）
     const allRecords = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
-      filter,
       pageSize: 500,
     });
 
-    if (allRecords.length === 0) {
+    // 代码过滤：只处理状态为 '未打标' 的记录
+    const untaggedRecords = allRecords.filter((r) => {
+      const status = String(r.fields[FEEDBACK_FIELDS.STATUS] || '');
+      return status === '未打标';
+    });
+
+    if (untaggedRecords.length === 0) {
       console.log('[Cron] 没有需要打标的反馈');
       return 0;
     }
 
-    console.log(`[Cron] 发现 ${allRecords.length} 条未打标反馈，开始批量AI打标（每批 ${batchSize} 条）`);
+    console.log(`[Cron] 发现 ${untaggedRecords.length} 条未打标反馈（status=new），开始批量AI打标（每批 ${batchSize} 条）`);
 
     // 预加载标签（缓存 5 分钟）
     const existingTags = await tagger.getCachedTags();
@@ -429,10 +427,10 @@ async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
     let failCount = 0;
 
     // 分批处理
-    for (let i = 0; i < allRecords.length; i += batchSize) {
-      const batch = allRecords.slice(i, i + batchSize);
+    for (let i = 0; i < untaggedRecords.length; i += batchSize) {
+      const batch = untaggedRecords.slice(i, i + batchSize);
       const batchNum = Math.floor(i / batchSize) + 1;
-      const totalBatches = Math.ceil(allRecords.length / batchSize);
+      const totalBatches = Math.ceil(untaggedRecords.length / batchSize);
       console.log(`[Cron] 打标批次 ${batchNum}/${totalBatches}（${batch.length} 条）`);
 
       const t0 = Date.now();
@@ -487,10 +485,47 @@ async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
         }
       }
 
+      // 同步创建/更新标签和统计数据
+      for (let j = 0; j < results.length; j++) {
+        const result = results[j];
+        if (!result.success || !result.result) continue;
+
+        const record = batch[j];
+        const tenantScale = String(record.fields[FEEDBACK_FIELDS.TENANT_SCALE] || '');
+        const npsScore = Number(record.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0);
+
+        for (const tag1 of result.result.tag1) {
+          try {
+            await tagger.ensureTagExists(tag1, null, null, 'tag1');
+            await tagger.updateTagStatistics(tag1, 'tag1', tenantScale, npsScore);
+          } catch (tagErr) {
+            console.error(`[Cron] 更新Tag1失败 ${tag1}:`, tagErr);
+          }
+        }
+
+        for (const tag2 of result.result.tag2) {
+          try {
+            await tagger.ensureTagExists(null, tag2, null, 'tag2');
+            await tagger.updateTagStatistics(tag2, 'tag2', tenantScale, npsScore);
+          } catch (tagErr) {
+            console.error(`[Cron] 更新Tag2失败 ${tag2}:`, tagErr);
+          }
+        }
+
+        for (const tag3 of result.result.tag3) {
+          try {
+            await tagger.ensureTagExists(null, null, tag3, 'tag3');
+            await tagger.updateTagStatistics(tag3, 'tag3', tenantScale, npsScore);
+          } catch (tagErr) {
+            console.error(`[Cron] 更新Tag3失败 ${tag3}:`, tagErr);
+          }
+        }
+      }
+
       failCount += results.filter(r => !r.success).length;
     }
 
-    console.log(`[Cron] AI打标完成，总计成功 ${successCount}/${allRecords.length}，失败 ${failCount}`);
+    console.log(`[Cron] AI打标完成，总计成功 ${successCount}/${untaggedRecords.length}，失败 ${failCount}`);
     return successCount;
   } catch (error) {
     console.error('[Cron] 自动打标失败', error);
@@ -880,11 +915,11 @@ async function runSyncWithMockData(): Promise<SyncResult> {
   let failedCount = 0;
 
   try {
-    // Mock: 生成 50 条模拟反馈（减少 API 调用量）
+    // Mock: 生成 50 条模拟反馈
     const mockFeedbacks = generateMockFeedbacks(50);
     console.log(`[Cron DEV] 生成了 ${mockFeedbacks.length} 条 Mock 反馈`);
 
-    // Mock: 写入多维表格（批量写入，使用时间戳避免重复）
+    // Mock: 写入多维表格（状态设为"未打标"，以便后续 AI 打标）
     const ts = Date.now();
     const records = mockFeedbacks.map((fb, i) => ({
       fields: {
@@ -898,7 +933,7 @@ async function runSyncWithMockData(): Promise<SyncResult> {
         [FEEDBACK_FIELDS.TENANT_SCALE]: fb.tenantScale,
         [FEEDBACK_FIELDS.USER_ID]: fb.userId,
         [FEEDBACK_FIELDS.USER_NAME]: 'Mock用户',
-        '审核状态': '已打标',
+        [FEEDBACK_FIELDS.STATUS]: '未打标',
       },
     }));
 
@@ -906,6 +941,7 @@ async function runSyncWithMockData(): Promise<SyncResult> {
       await bitableClient.batchCreateRecords(TABLE_NAMES.FEEDBACK, records);
       syncedCount = records.length;
       console.log(`[Cron DEV] 批量写入 ${syncedCount} 条 Mock 反馈`);
+      details.push(`[Mock] 写入 ${syncedCount} 条反馈到飞书表格`);
     } catch (err) {
       console.error('[Cron DEV] 批量写入失败:', err);
       // 回退：逐条写入
@@ -919,39 +955,38 @@ async function runSyncWithMockData(): Promise<SyncResult> {
       }
     }
 
-    // Mock: AI 打标（跳过实际更新）
-    details.push('[Mock] AI 打标已跳过（Mock 模式）');
+    // AI 打标：对刚写入的 Mock 数据进行真实 AI 打标
+    console.log('[Cron DEV] 开始 AI 打标...');
+    const tagResult = await autoTagFeedbacks(50);
+    if (tagResult > 0) {
+      details.push(`[Mock] AI 打标完成 ${tagResult} 条反馈`);
+      console.log(`[Cron DEV] AI 打标完成: ${tagResult} 条`);
+    } else {
+      details.push('[Mock] AI 打标无新数据');
+    }
 
     // Mock: 生成报告
     details.push('[Mock] 报告生成成功');
 
-    // Mock: 发送通知（真实发送到飞书）
-    try {
-      const chatId = process.env.NOTIFICATION_CHAT_ID;
-      if (chatId) {
-        const now = new Date();
-        const weekNum = `第${getISOWeek(now)}周`;
-        await feishuBot.sendCardMessage(
-          chatId,
-          createWeeklyReportCard({
-            weekNumber: `${now.getFullYear()}年${weekNum}`,
-            totalFeedbacks: syncedCount,
-            reviewCount: 0,
-            topIssues: [],
-            scoreDistribution: [{ score: '1', pct: 20 }, { score: '2-3', pct: 50 }, { score: '4-5', pct: 30 }],
-            bitableUrl: process.env.FEISHU_BITABLE_URL || '',
-            logPlatformUrl: process.env.LOG_PLATFORM_URL || '',
-            hasNeedLogCheck: false,
-            hasReviewNeeded: false,
-          })
-        );
-        details.push(`[Mock] 通知已发送到飞书（${syncedCount} 条反馈）`);
-      } else {
-        details.push('[Mock] 通知跳过（未配置 NOTIFICATION_CHAT_ID）');
+    // 使用统一的通知发送逻辑
+    const notificationResult = await sendNotification(syncedCount);
+    if (notificationResult) {
+      details.push('[Mock] 发送通知成功');
+    }
+
+    // 使用统一的周报生成逻辑
+    if (notificationResult) {
+      try {
+        const docResult = await generateWeeklyDoc();
+        if (docResult) {
+          details.push('[Mock] 生成周报文档成功');
+        } else {
+          details.push('[Mock] 生成周报文档失败');
+        }
+      } catch (docErr) {
+        console.error('[Cron DEV] 周报文档生成失败', docErr);
+        details.push(`[Mock] 生成周报文档失败: ${docErr instanceof Error ? docErr.message : '未知错误'}`);
       }
-    } catch (notifyErr) {
-      console.error('[Cron DEV] 通知发送失败:', notifyErr);
-      details.push(`[Mock] 通知发送失败: ${notifyErr instanceof Error ? notifyErr.message : '未知错误'}`);
     }
 
     return {

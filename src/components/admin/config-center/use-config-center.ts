@@ -14,7 +14,7 @@ import type {
 import { DEFAULT_TAG1, POPULAR_MODELS, createDefaultConfig } from '@/constants/config-center';
 
 export function useConfigCenter() {
-  const [activeTab, setActiveTab] = useState<ConfigTabKey>('integration');
+  const [activeTab, setActiveTab] = useState<ConfigTabKey>('feishu');
   const [isLoading, setIsLoading] = useState(false);
   const [bitableCreateOpen, setBitableCreateOpen] = useState(false);
   const [bitableLinkOpen, setBitableLinkOpen] = useState(false);

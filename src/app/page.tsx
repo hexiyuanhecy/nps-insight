@@ -5,7 +5,7 @@
 
 import Link from 'next/link';
 import { BarChart3, MessageSquare, Settings, Sparkles, Clock, Shield } from 'lucide-react';
-import { MermaidDiagram } from '@/components/MermaidDiagram';
+import { MermaidDiagramExport as MermaidDiagram } from '@/components/MermaidDiagram';
 import { FeatureCard } from '@/components/home/FeatureCard';
 import { RoleCards } from '@/components/home/RoleCards';
 import { FLOW_CHART, HUMAN_FLOW_CHART, MIND_MAP_CHART } from '@/constants/home-page-charts';

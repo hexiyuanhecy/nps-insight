@@ -978,3 +978,99 @@ async function createTenantInfoTableWithRetry(token: string, appToken: string): 
 async function createPeriodAnalysisTableWithRetry(token: string, appToken: string): Promise<string> {
   return createTableWithRetry('周期分析', createPeriodAnalysisTable, token, appToken);
 }
+
+// ============================================
+// 协作者管理
+// ============================================
+
+/**
+ * 将用户添加为多维表格协作者
+ * @param appToken 表格 App Token
+ * @param userId 飞书用户 ID（ou_xxx）
+ * @param role 角色：editor（可编辑）或 viewer（仅查看）
+ */
+export async function addBitableMember(
+  appToken: string,
+  userId: string,
+  role: 'editor' | 'viewer' = 'editor'
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const token = await getTenantAccessToken();
+
+    const response = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/members`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        member_type: 'userid',
+        member_id: userId,
+        role,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.code === 0) {
+      console.log(`[协作者] 成功添加用户 ${userId} 为 ${role}`);
+      return { success: true };
+    }
+
+    // 忽略已存在的成员错误
+    if (data.code === 1432201 || data.msg?.includes('already exists')) {
+      console.log(`[协作者] 用户 ${userId} 已是协作者`);
+      return { success: true };
+    }
+
+    console.warn(`[协作者] 添加用户 ${userId} 失败: ${data.msg}`);
+    return { success: false, error: data.msg || '添加协作者失败' };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : '未知错误';
+    console.error(`[协作者] 添加用户 ${userId} 异常: ${errorMsg}`);
+    return { success: false, error: errorMsg };
+  }
+}
+
+/**
+ * 批量将管理员用户添加为表格协作者
+ * @param appToken 表格 App Token
+ * @param adminUserIds 管理员用户 ID 列表（逗号分隔的字符串或数组）
+ * @returns 添加结果
+ */
+export async function addBitableAdminMembers(
+  appToken: string,
+  adminUserIds: string | string[] | undefined
+): Promise<{ successCount: number; failCount: number; errors: string[] }> {
+  const result = { successCount: 0, failCount: 0, errors: [] as string[] };
+
+  if (!adminUserIds) {
+    console.log('[协作者] 未配置管理员，跳过添加');
+    return result;
+  }
+
+  // 解析管理员 ID 列表
+  const userIds = Array.isArray(adminUserIds)
+    ? adminUserIds
+    : String(adminUserIds).split(',').map((s) => s.trim()).filter(Boolean);
+
+  if (userIds.length === 0) {
+    console.log('[协作者] 管理员列表为空，跳过添加');
+    return result;
+  }
+
+  console.log(`[协作者] 开始添加 ${userIds.length} 个管理员...`);
+
+  for (const userId of userIds) {
+    const addResult = await addBitableMember(appToken, userId, 'editor');
+    if (addResult.success) {
+      result.successCount++;
+    } else {
+      result.failCount++;
+      result.errors.push(`${userId}: ${addResult.error}`);
+    }
+  }
+
+  console.log(`[协作者] 添加完成: 成功 ${result.successCount}，失败 ${result.failCount}`);
+  return result;
+}

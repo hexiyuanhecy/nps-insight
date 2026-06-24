@@ -43,15 +43,15 @@ export async function runManualSync(config: TabConfig): Promise<ConfigApiRespons
   return postConfig({ action: 'runManualSync', config });
 }
 
-export async function createBitable(feishu: TabConfig['feishu']): Promise<ConfigApiResponse> {
-  return postConfig({ action: 'createBitable', config: feishu });
+export async function createBitable(config: TabConfig): Promise<ConfigApiResponse> {
+  return postConfig({ action: 'createBitable', config });
 }
 
 export async function linkBitable(
-  feishu: TabConfig['feishu'],
+  config: TabConfig,
   appToken: string,
 ): Promise<ConfigApiResponse> {
-  return postConfig({ action: 'linkBitable', config: { ...feishu, appToken } });
+  return postConfig({ action: 'linkBitable', config, appToken });
 }
 
 export async function retagHistory(config: TabConfig): Promise<ConfigApiResponse> {

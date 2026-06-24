@@ -1,6 +1,6 @@
 /** 配置中心 Tab 配置类型 */
 
-export type ConfigTabKey = 'integration' | 'ai' | 'ops';
+export type ConfigTabKey = 'feishu' | 'datasource' | 'tagging';
 
 export type BitableMode = 'create' | 'link' | 'idle';
 export type BitableStatus = 'unset' | 'created' | 'linked';

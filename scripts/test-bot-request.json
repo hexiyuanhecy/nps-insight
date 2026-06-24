@@ -1,0 +1,40 @@
+{
+  "schema": "2.0",
+  "header": {
+    "event_id": "test_event",
+    "token": "test_token",
+    "create_time": "1782282000",
+    "event_type": "im.message.receive_v1",
+    "tenant_key": "test_tenant"
+  },
+  "event": {
+    "message": {
+      "message_id": "test_msg",
+      "root_id": "",
+      "parent_id": "",
+      "create_time": "1782282000",
+      "chat_id": "oc_test",
+      "chat_type": "group",
+      "content": "{\"text\":\"/nps help\"}",
+      "msg_type": "text",
+      "mentions": [
+        {
+          "key": "@_user_1",
+          "id": {
+            "open_id": "test_user",
+            "user_id": "test_user"
+          },
+          "name": "test_user"
+        }
+      ]
+    },
+    "sender": {
+      "sender_id": {
+        "open_id": "test_user",
+        "user_id": "test_user"
+      },
+      "sender_type": "user",
+      "tenant_key": "test_tenant"
+    }
+  }
+}

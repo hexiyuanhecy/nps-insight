@@ -117,17 +117,17 @@ export function useConfigActions({
     if (!config) return;
     try {
       setIsLoading(true);
-      const result = await createBitable(config.feishu);
+      const result = await createBitable(config);
       if (result.success) {
         const newAppToken = result.appToken || '';
         const newConfig = {
           ...config,
           bitable: {
             ...config.bitable,
-            mode: 'link',
+            mode: 'link' as const,
             appToken: newAppToken,
-            url: newAppToken ? `https://bytedance.feishu.cn/base/${newAppToken}` : '',
-            status: 'linked',
+            url: newAppToken ? `https://www.feishu.cn/base/${newAppToken}` : '',
+            status: 'linked' as const,
           },
         };
         setConfig(newConfig);
@@ -145,7 +145,7 @@ export function useConfigActions({
     } finally {
       setIsLoading(false);
     }
-  }, [config, loadConfig, pushToast, setBitableCreateOpen, setConfig, setIsLoading, saveConfigV3]);
+  }, [config, loadConfig, pushToast, setBitableCreateOpen, setConfig, setIsLoading]);
 
   const linkTable = useCallback(async () => {
     if (!config) return;
@@ -155,15 +155,15 @@ export function useConfigActions({
     }
     try {
       setIsLoading(true);
-      const result = await linkBitable(config.feishu, config.bitable.appToken);
+      const result = await linkBitable(config, config.bitable.appToken);
       if (result.success) {
         const newConfig = {
           ...config,
           bitable: {
             ...config.bitable,
-            mode: 'link',
-            url: `https://bytedance.feishu.cn/base/${config.bitable.appToken}`,
-            status: 'linked',
+            mode: 'link' as const,
+            url: `https://www.feishu.cn/base/${config.bitable.appToken}`,
+            status: 'linked' as const,
           },
         };
         setConfig(newConfig);
@@ -178,7 +178,7 @@ export function useConfigActions({
     } finally {
       setIsLoading(false);
     }
-  }, [config, pushToast, setBitableLinkOpen, setConfig, setIsLoading, saveConfigV3]);
+  }, [config, pushToast, setBitableLinkOpen, setConfig, setIsLoading]);
 
   const retagHistory = useCallback(async () => {
     if (!config) return;

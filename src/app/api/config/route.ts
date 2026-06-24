@@ -15,6 +15,7 @@ import path from 'path';
 import { AdapterFactory } from '@/lib/data-sources/adapter-factory';
 import { LLMProviderFactory } from '@/lib/llm/provider-factory';
 import {
+  addBitableAdminMembers,
   createNPSInsightBitable,
   extractAppToken,
   validateAndGetBitableInfo,
@@ -722,6 +723,22 @@ async function createBitableAction(data: any) {
     notifyConfigChange('bitable', 'appToken', result.appToken);
     notifyConfigChange('bitable', 'url', newUrl);
 
+    // 获取管理员用户 ID
+    const adminUserIds = data.config?.notification?.adminUserIds ||
+      data.notification?.adminUserIds ||
+      process.env.NOTIFICATION_ADMIN_USER_IDS ||
+      '';
+
+    // 自动将管理员添加为表格协作者
+    let adminAddResult: { successCount: number; failCount: number; errors: string[] } | null = null;
+    if (adminUserIds && String(adminUserIds).trim()) {
+      console.log('[创建表格] 开始添加管理员协作者...');
+      adminAddResult = await addBitableAdminMembers(result.appToken, adminUserIds);
+      if (adminAddResult.failCount > 0) {
+        console.warn('[创建表格] 部分管理员添加失败:', adminAddResult.errors);
+      }
+    }
+
     const baseConfig = buildV3Config();
     const updatedConfig = {
       ...baseConfig,
@@ -744,13 +761,24 @@ async function createBitableAction(data: any) {
       analysisTableId: result.tables?.periodTableId || '',
     };
 
+    // 构建成功消息
+    let successMessage = '多维表格创建成功';
+    if (adminAddResult) {
+      if (adminAddResult.failCount === 0) {
+        successMessage += `，已将 ${adminAddResult.successCount} 位管理员添加为协作者`;
+      } else {
+        successMessage += `，但有 ${adminAddResult.failCount} 位管理员添加失败（可能权限不足，请手动添加）`;
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      message: '多维表格创建成功',
+      message: successMessage,
       data: {
         appToken: result.appToken,
         url: newUrl,
         tables,
+        adminAddResult,
       },
     });
   } catch (error) {
@@ -802,6 +830,22 @@ async function linkBitableAction(data: any) {
       await addMissingFields(appToken, fieldCheck.feedbackTableId, fieldCheck.missingFields);
     }
 
+    // 获取管理员用户 ID
+    const adminUserIds = data.config?.notification?.adminUserIds ||
+      data.notification?.adminUserIds ||
+      process.env.NOTIFICATION_ADMIN_USER_IDS ||
+      '';
+
+    // 自动将管理员添加为表格协作者
+    let adminAddResult: { successCount: number; failCount: number; errors: string[] } | null = null;
+    if (adminUserIds && String(adminUserIds).trim()) {
+      console.log('[绑定表格] 开始添加管理员协作者...');
+      adminAddResult = await addBitableAdminMembers(appToken, adminUserIds);
+      if (adminAddResult.failCount > 0) {
+        console.warn('[绑定表格] 部分管理员添加失败:', adminAddResult.errors);
+      }
+    }
+
     notifyConfigChange('bitable', 'appToken', appToken);
     notifyConfigChange('bitable', 'url', data.url || `https://www.feishu.cn/base/${appToken}`);
 
@@ -812,17 +856,28 @@ async function linkBitableAction(data: any) {
       analysisTableId: fieldCheck.analysisTableId || '',
     };
 
+    // 构建成功消息
+    let successMessage = fieldCheck.missingFields.length > 0
+      ? `关联成功，已补充 ${fieldCheck.missingFields.length} 个缺失字段`
+      : '关联成功';
+
+    if (adminAddResult) {
+      if (adminAddResult.failCount === 0) {
+        successMessage += `，已将 ${adminAddResult.successCount} 位管理员添加为协作者`;
+      } else {
+        successMessage += `，但有 ${adminAddResult.failCount} 位管理员添加失败（可能权限不足，请手动添加）`;
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      message:
-        fieldCheck.missingFields.length > 0
-          ? `关联成功，已补充 ${fieldCheck.missingFields.length} 个缺失字段`
-          : '关联成功',
+      message: successMessage,
       data: {
         appToken,
         url: `https://www.feishu.cn/base/${appToken}`,
         tables,
         missingFields: fieldCheck.missingFields,
+        adminAddResult,
       },
     });
   } catch (error) {

@@ -128,9 +128,9 @@ export const TENANT_LEVELS = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'] as const;
 export const MOCK_LOG_URL = '/api/mock/logs?userId=demo&start=2025-01-01&end=2025-01-31';
 
 export const CONFIG_TAB_META = [
-  { key: 'integration' as const, name: '飞书与集成', desc: '飞书账号 / 多维表格 / 数据源 / Webhook' },
-  { key: 'ai' as const, name: 'AI 与标签', desc: 'AI 模型 / 标签体系 / 打标规则' },
-  { key: 'ops' as const, name: '任务与运营', desc: '定时任务 / 日志平台 / 通知' },
+  { key: 'feishu' as const, name: '飞书配置', desc: '飞书应用 / 通知群 / 多维表格 / 大租户' },
+  { key: 'datasource' as const, name: '数据源', desc: '反馈来源 / API / Excel / 日志平台' },
+  { key: 'tagging' as const, name: '打标与分析配置', desc: 'AI 模型 / 标签体系 / 置信度 / 定时任务' },
 ];
 
 export function createDefaultConfig(): TabConfig {
