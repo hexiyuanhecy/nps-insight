@@ -85,17 +85,19 @@ export async function analyzeFeedback(
     tag1List, tag2List, tag3List, confidenceThreshold
   );
 
-  const result = await chatCompletionJSON<Array<{
-    tag1: string[];
-    tag2: string[];
-    tag3: string[];
-    confidence: number;
-    needLogCheck: boolean;
-    translatedContent: string;
-  }>>([{ role: 'user', content: prompt }], { temperature: 0.3 });
+  const result = await chatCompletionJSON<{
+    results: Array<{
+      tag1: string[];
+      tag2: string[];
+      tag3: string[];
+      confidence: number;
+      needLogCheck: boolean;
+      translatedContent: string;
+    }>;
+  }>([{ role: 'user', content: prompt }], { temperature: 0.3 });
 
-  // result 是数组，取第一条
-  const raw = result?.[0] || {};
+  // result 是 { results: [...] } 格式，取第一条
+  const raw = result?.results?.[0] || {};
   return normalizeTagResult(raw, confidenceThreshold);
 }
 
@@ -142,17 +144,32 @@ export async function batchAnalyzeFeedbacks(
   const prompt = generateBatchTaggingPrompt(inputs, tag1List, tag2List, tag3List, confidenceThreshold);
 
   try {
-    const result = await chatCompletionJSON<Array<{
-      tag1: string[];
-      tag2: string[];
-      tag3: string[];
-      confidence: number;
-      needLogCheck: boolean;
-      translatedContent: string;
-    }>>([{ role: 'user', content: prompt }], { temperature: 0.3 });
+    const result = await chatCompletionJSON<{
+      results: Array<{
+        tag1: string[];
+        tag2: string[];
+        tag3: string[];
+        confidence: number;
+        needLogCheck: boolean;
+        translatedContent: string;
+      }>;
+    }>([{ role: 'user', content: prompt }], { temperature: 0.3, maxTokens: 8192 });
+
+    const resultsArray = result?.results || [];
+
+    // 建立 inputs 索引到 result 索引的映射
+    const inputIndexMap = new Map<number, number>();
+    let inputIdx = 0;
+    for (let i = 0; i < batch.length; i++) {
+      if (batch[i].content) {
+        inputIndexMap.set(i, inputIdx);
+        inputIdx++;
+      }
+    }
 
     return batch.map((fb, idx) => {
-      const raw = inputs[idx] ? result?.[idx] : {};
+      const resultIdx = inputIndexMap.get(idx);
+      const raw = resultIdx !== undefined ? resultsArray[resultIdx] : null;
       const normalized = normalizeTagResult(raw || { tag1: [] as string[], tag2: [] as string[], tag3: [] as string[], confidence: 0, needLogCheck: false, translatedContent: '' } as any, confidenceThreshold);
       return { success: true, result: normalized, recordId: fb.record_id };
     });
@@ -194,27 +211,28 @@ export async function completeTaggingProcess(
     console.log(`[Tagger] 步骤2: 创建/更新标签`);
     let newTagsCreated = 0;
     for (const tag1 of aiResult.tag1) {
-      await ensureTagExists(tag1, null, null, 'tag1');
+      await ensureTagExists(tag1, 'tag1');
       newTagsCreated++;
     }
     for (const tag2 of aiResult.tag2) {
-      await ensureTagExists(null, tag2, null, 'tag2');
+      await ensureTagExists(tag2, 'tag2');
       newTagsCreated++;
     }
     for (const tag3 of aiResult.tag3) {
-      await ensureTagExists(null, null, tag3, 'tag3');
+      await ensureTagExists(tag3, 'tag3');
       newTagsCreated++;
     }
 
     // 4. 更新反馈记录
     console.log(`[Tagger] 步骤3: 更新反馈记录`);
+    // MultiSelect 字段需要传入字符串数组，过滤空字符串，确保格式正确
     await bitableClient.updateRecord(TABLE_NAMES.FEEDBACK, recordId, {
-      [FEEDBACK_FIELDS.TAG1]: aiResult.tag1,
-      [FEEDBACK_FIELDS.TAG2]: aiResult.tag2,
-      [FEEDBACK_FIELDS.TAG3]: aiResult.tag3,
+      [FEEDBACK_FIELDS.TAG1]: (aiResult.tag1 || []).filter(t => t),
+      [FEEDBACK_FIELDS.TAG2]: (aiResult.tag2 || []).filter(t => t),
+      [FEEDBACK_FIELDS.TAG3]: (aiResult.tag3 || []).filter(t => t),
       [FEEDBACK_FIELDS.CONFIDENCE]: aiResult.confidence,
-      [FEEDBACK_FIELDS.NEED_LOG_CHECK]: aiResult.needLogCheck,
-      [FEEDBACK_FIELDS.REVIEW_NEEDED]: aiResult.reviewNeeded,
+      [FEEDBACK_FIELDS.NEED_LOG_CHECK]: aiResult.needLogCheck ? '是' : '否',
+      [FEEDBACK_FIELDS.REVIEW_NEEDED]: aiResult.reviewNeeded ? '是' : '否',
       [FEEDBACK_FIELDS.TRANSLATED_CONTENT]: aiResult.translatedContent || '',
       [FEEDBACK_FIELDS.STATUS]: '已打标',
     });
@@ -228,78 +246,92 @@ export async function completeTaggingProcess(
 }
 
 /**
- * 确保标签存在于标签体系表中
+ * 确保标签存在于对应的标签表中
+ * @param tagName 标签名称
+ * @param level 标签层级（'tag1' | 'tag2' | 'tag3'）
  */
 export async function ensureTagExists(
-  tag1Name: string | null,
-  tag2Name: string | null,
-  tag3Name: string | null,
+  tagName: string,
   level: 'tag1' | 'tag2' | 'tag3'
 ): Promise<void> {
-  const existing = await getAllTags();
+  try {
+    const existing = await getCachedTags();
 
-  if (level === 'tag1') {
-    const found = existing.find(t => t.tag1Name === tag1Name);
+    // 根据层级确定表名和字段定义
+    let tableName: string;
+    let tagIdField: string;
+    let nameField: string;
+    let usageCountField: string;
+    let largeTenantCountField: string;
+    let largeTenantRatioField: string;
+    let tagIdPrefix: string;
+
+    if (level === 'tag1') {
+      tableName = TABLE_NAMES.TAG1;
+      tagIdField = TAG1_FIELDS.TAG_ID;
+      nameField = TAG1_FIELDS.NAME;
+      usageCountField = TAG1_FIELDS.USAGE_COUNT;
+      largeTenantCountField = TAG1_FIELDS.LARGE_TENANT_COUNT;
+      largeTenantRatioField = TAG1_FIELDS.LARGE_TENANT_RATIO;
+      tagIdPrefix = 'tag1';
+    } else if (level === 'tag2') {
+      tableName = TABLE_NAMES.TAG2;
+      tagIdField = TAG2_FIELDS.TAG_ID;
+      nameField = TAG2_FIELDS.NAME;
+      usageCountField = TAG2_FIELDS.USAGE_COUNT;
+      largeTenantCountField = TAG2_FIELDS.LARGE_TENANT_COUNT;
+      largeTenantRatioField = TAG2_FIELDS.LARGE_TENANT_RATIO;
+      tagIdPrefix = 'tag2';
+    } else {
+      tableName = TABLE_NAMES.TAG3;
+      tagIdField = TAG3_FIELDS.TAG_ID;
+      nameField = TAG3_FIELDS.NAME;
+      usageCountField = TAG3_FIELDS.USAGE_COUNT;
+      largeTenantCountField = TAG3_FIELDS.LARGE_TENANT_COUNT;
+      largeTenantRatioField = TAG3_FIELDS.LARGE_TENANT_RATIO;
+      tagIdPrefix = 'tag3';
+    }
+
+    // 查找标签是否已存在
+    const found = existing.find(t => t.table === level && (
+      (level === 'tag1' && t.tag1Name === tagName) ||
+      (level === 'tag2' && t.tag2Name === tagName) ||
+      (level === 'tag3' && t.tag3Name === tagName)
+    ));
+
     if (!found) {
-      await bitableClient.createRecord(TABLE_NAMES.TAG1, {
-        [TAG1_FIELDS.TAG_ID]: `tag1_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        [TAG1_FIELDS.NAME]: tag1Name!,
-        [TAG1_FIELDS.USAGE_COUNT]: 1,
-        [TAG1_FIELDS.LARGE_TENANT_COUNT]: 0,
-        [TAG1_FIELDS.LARGE_TENANT_RATIO]: 0,
+      // 创建新标签
+      const tagId = `${tagIdPrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      await bitableClient.createRecord(tableName, {
+        [tagIdField]: tagId,
+        [nameField]: tagName,
+        [usageCountField]: 1,
+        [largeTenantCountField]: 0,
+        [largeTenantRatioField]: 0,
       });
+      console.log(`[Tagger] 创建新标签: ${level} - ${tagName}`);
+      // 新标签创建后使缓存失效
       invalidateTagCache();
     } else {
-      await bitableClient.updateRecord(TABLE_NAMES.TAG1, found.recordId!, {
-        [TAG1_FIELDS.USAGE_COUNT]: found.usageCount + 1,
+      // 更新使用次数
+      await bitableClient.updateRecord(tableName, found.recordId!, {
+        [usageCountField]: found.usageCount + 1,
       });
-      invalidateTagCache();
+      console.log(`[Tagger] 更新标签使用次数: ${level} - ${tagName} (${found.usageCount + 1})`);
     }
-  } else if (level === 'tag2') {
-    const found = existing.find(t => t.tag2Name === tag2Name);
-    if (!found) {
-      await bitableClient.createRecord(TABLE_NAMES.TAG2, {
-        [TAG2_FIELDS.TAG_ID]: `tag2_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        [TAG2_FIELDS.NAME]: tag2Name!,
-        [TAG2_FIELDS.USAGE_COUNT]: 1,
-        [TAG2_FIELDS.LARGE_TENANT_COUNT]: 0,
-        [TAG2_FIELDS.LARGE_TENANT_RATIO]: 0,
-        [TAG2_FIELDS.AVG_SCORE]: 0,
-      });
-      invalidateTagCache();
-    } else {
-      await bitableClient.updateRecord(TABLE_NAMES.TAG2, found.recordId!, {
-        [TAG2_FIELDS.USAGE_COUNT]: found.usageCount + 1,
-      });
-      invalidateTagCache();
-    }
-  } else {
-    const found = existing.find(t => t.tag3Name === tag3Name);
-    if (!found) {
-      await bitableClient.createRecord(TABLE_NAMES.TAG3, {
-        [TAG3_FIELDS.TAG_ID]: `tag3_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        [TAG3_FIELDS.NAME]: tag3Name!,
-        [TAG3_FIELDS.USAGE_COUNT]: 1,
-        [TAG3_FIELDS.LARGE_TENANT_COUNT]: 0,
-        [TAG3_FIELDS.LARGE_TENANT_RATIO]: 0,
-        [TAG3_FIELDS.AVG_SCORE]: 0,
-      });
-      invalidateTagCache();
-    } else {
-      await bitableClient.updateRecord(TABLE_NAMES.TAG3, found.recordId!, {
-        [TAG3_FIELDS.USAGE_COUNT]: found.usageCount + 1,
-      });
-      invalidateTagCache();
-    }
+  } catch (error) {
+    console.error(`[Tagger] 确保标签存在失败: ${level} - ${tagName}`, error);
+    throw error;
   }
 }
 
 /**
- * 更新标签统计字段（大租户数、大租户占比、平均分）
+ * 更新标签统计数据（大租户数、大租户占比）
+ * 注意：标签表目前没有 avgScore 字段，暂不更新平均分
  * @param tagName 标签名称
  * @param level 标签级别（tag1/tag2/tag3）
- * @param tenantScale 租户规模（如 A5）
- * @param npsScore NPS 分数
+ * @param tenantScale 租户规模（A1-A6）
+ * @param npsScore NPS评分（1-5）（暂未使用，保留参数供未来使用）
  */
 export async function updateTagStatistics(
   tagName: string,
@@ -307,14 +339,15 @@ export async function updateTagStatistics(
   tenantScale: string,
   npsScore: number
 ): Promise<void> {
-  const isLargeTenant = tenantScale === 'A5' || tenantScale === 'A6';
+  // 大租户定义：A4/A5/A6
+  const isLargeTenant = ['A4', 'A5', 'A6'].includes(tenantScale);
 
+  // 根据级别选择表和字段定义
   let tableName: string;
   let nameField: string;
   let usageCountField: string;
   let largeTenantCountField: string;
   let largeTenantRatioField: string;
-  let avgScoreField: string | null;
 
   if (level === 'tag1') {
     tableName = TABLE_NAMES.TAG1;
@@ -322,51 +355,51 @@ export async function updateTagStatistics(
     usageCountField = TAG1_FIELDS.USAGE_COUNT;
     largeTenantCountField = TAG1_FIELDS.LARGE_TENANT_COUNT;
     largeTenantRatioField = TAG1_FIELDS.LARGE_TENANT_RATIO;
-    avgScoreField = null;
   } else if (level === 'tag2') {
     tableName = TABLE_NAMES.TAG2;
     nameField = TAG2_FIELDS.NAME;
     usageCountField = TAG2_FIELDS.USAGE_COUNT;
     largeTenantCountField = TAG2_FIELDS.LARGE_TENANT_COUNT;
     largeTenantRatioField = TAG2_FIELDS.LARGE_TENANT_RATIO;
-    avgScoreField = TAG2_FIELDS.AVG_SCORE;
   } else {
     tableName = TABLE_NAMES.TAG3;
     nameField = TAG3_FIELDS.NAME;
     usageCountField = TAG3_FIELDS.USAGE_COUNT;
     largeTenantCountField = TAG3_FIELDS.LARGE_TENANT_COUNT;
     largeTenantRatioField = TAG3_FIELDS.LARGE_TENANT_RATIO;
-    avgScoreField = TAG3_FIELDS.AVG_SCORE;
   }
 
   try {
-    const records = await bitableClient.listRecords(tableName, { pageSize: 500 });
-    const found = records.find(r => String(r.fields[nameField] || '') === tagName);
+    // 查找标签记录
+    const existingRecords = await bitableClient.listRecords(tableName, { pageSize: 500 });
+    const found = existingRecords.find(r => String(r.fields[nameField] || '') === tagName);
 
     if (!found) {
+      // 标签不存在，跳过统计更新（ensureTagExists 会创建）
+      console.warn(`[Tagger] 标签 ${tagName} 不存在，跳过统计更新`);
       return;
     }
 
-    const oldUsageCount = Number(found.fields[usageCountField] || 0);
-    const oldLargeTenantCount = Number(found.fields[largeTenantCountField] || 0);
-    const newUsageCount = oldUsageCount + 1;
-    const newLargeTenantCount = isLargeTenant ? oldLargeTenantCount + 1 : oldLargeTenantCount;
-    const newLargeTenantRatio = newUsageCount > 0 ? newLargeTenantCount / newUsageCount : 0;
+    // 获取当前统计数据
+    const currentUsageCount = Number(found.fields[usageCountField] || 0);
+    const currentLargeTenantCount = Number(found.fields[largeTenantCountField] || 0);
 
-    const updateFields: Record<string, number> = {
+    // 计算新的统计数据
+    // 大租户数：如果是大租户，则增加计数
+    const newLargeTenantCount = isLargeTenant ? currentLargeTenantCount + 1 : currentLargeTenantCount;
+    
+    // 大租户占比：大租户数 / 使用次数（百分比）
+    const newLargeTenantRatio = currentUsageCount > 0 ? Math.round((newLargeTenantCount / currentUsageCount) * 100) : 0;
+
+    // 更新记录
+    await bitableClient.updateRecord(tableName, found.record_id, {
       [largeTenantCountField]: newLargeTenantCount,
-      [largeTenantRatioField]: Math.round(newLargeTenantRatio * 10000) / 10000,
-    };
+      [largeTenantRatioField]: newLargeTenantRatio,
+    });
 
-    if (avgScoreField) {
-      const oldAvgScore = Number(found.fields[avgScoreField] || 0);
-      const newAvgScore = (oldAvgScore * oldUsageCount + npsScore) / newUsageCount;
-      updateFields[avgScoreField] = Math.round(newAvgScore * 100) / 100;
-    }
-
-    await bitableClient.updateRecord(tableName, found.record_id, updateFields);
+    console.log(`[Tagger] 更新标签 ${tagName} 统计: 大租户=${newLargeTenantCount}, 占比=${newLargeTenantRatio}%`);
   } catch (error) {
-    console.error(`[Tagger] 更新标签统计失败 [${level}] ${tagName}:`, error);
+    console.error(`[Tagger] 更新标签统计失败 ${tagName}:`, error);
   }
 }
 
@@ -375,47 +408,65 @@ export async function updateTagStatistics(
 // ============================================
 
 /**
- * 获取所有标签
+ * 获取所有标签（分别从 TAG1、TAG2、TAG3 三张表读取）
  */
 export async function getAllTags(): Promise<TagRecord[]> {
   try {
-    const [tag1Records, tag2Records, tag3Records] = await Promise.all([
-      bitableClient.listRecords(TABLE_NAMES.TAG1, { pageSize: 500 }),
-      bitableClient.listRecords(TABLE_NAMES.TAG2, { pageSize: 500 }),
-      bitableClient.listRecords(TABLE_NAMES.TAG3, { pageSize: 500 }),
-    ]);
+    const allTags: TagRecord[] = [];
 
-    const tag1Mapped: TagRecord[] = tag1Records.map((record) => ({
-      tagId: String(record.fields[TAG1_FIELDS.TAG_ID] || ''),
-      tag1Name: String(record.fields[TAG1_FIELDS.NAME] || ''),
-      tag2Name: '',
-      tag3Name: '',
-      usageCount: Number(record.fields[TAG1_FIELDS.USAGE_COUNT] || 0),
-      recordId: record.record_id,
-      table: 'tag1',
-    }));
+    // 1. 从 TAG1 表读取一级标签
+    const tag1Records = await bitableClient.listRecords(TABLE_NAMES.TAG1, { pageSize: 500 });
+    for (const record of tag1Records) {
+      const name = String(record.fields[TAG1_FIELDS.NAME] || '');
+      if (name) {
+        allTags.push({
+          tagId: String(record.fields[TAG1_FIELDS.TAG_ID] || ''),
+          tag1Name: name,
+          tag2Name: '',
+          tag3Name: '',
+          usageCount: Number(record.fields[TAG1_FIELDS.USAGE_COUNT] || 0),
+          recordId: record.record_id,
+          table: 'tag1',
+        });
+      }
+    }
 
-    const tag2Mapped: TagRecord[] = tag2Records.map((record) => ({
-      tagId: String(record.fields[TAG2_FIELDS.TAG_ID] || ''),
-      tag1Name: '',
-      tag2Name: String(record.fields[TAG2_FIELDS.NAME] || ''),
-      tag3Name: '',
-      usageCount: Number(record.fields[TAG2_FIELDS.USAGE_COUNT] || 0),
-      recordId: record.record_id,
-      table: 'tag2',
-    }));
+    // 2. 从 TAG2 表读取二级标签
+    const tag2Records = await bitableClient.listRecords(TABLE_NAMES.TAG2, { pageSize: 500 });
+    for (const record of tag2Records) {
+      const name = String(record.fields[TAG2_FIELDS.NAME] || '');
+      if (name) {
+        allTags.push({
+          tagId: String(record.fields[TAG2_FIELDS.TAG_ID] || ''),
+          tag1Name: '',
+          tag2Name: name,
+          tag3Name: '',
+          usageCount: Number(record.fields[TAG2_FIELDS.USAGE_COUNT] || 0),
+          recordId: record.record_id,
+          table: 'tag2',
+        });
+      }
+    }
 
-    const tag3Mapped: TagRecord[] = tag3Records.map((record) => ({
-      tagId: String(record.fields[TAG3_FIELDS.TAG_ID] || ''),
-      tag1Name: '',
-      tag2Name: '',
-      tag3Name: String(record.fields[TAG3_FIELDS.NAME] || ''),
-      usageCount: Number(record.fields[TAG3_FIELDS.USAGE_COUNT] || 0),
-      recordId: record.record_id,
-      table: 'tag3',
-    }));
+    // 3. 从 TAG3 表读取三级标签
+    const tag3Records = await bitableClient.listRecords(TABLE_NAMES.TAG3, { pageSize: 500 });
+    for (const record of tag3Records) {
+      const name = String(record.fields[TAG3_FIELDS.NAME] || '');
+      if (name) {
+        allTags.push({
+          tagId: String(record.fields[TAG3_FIELDS.TAG_ID] || ''),
+          tag1Name: '',
+          tag2Name: '',
+          tag3Name: name,
+          usageCount: Number(record.fields[TAG3_FIELDS.USAGE_COUNT] || 0),
+          recordId: record.record_id,
+          table: 'tag3',
+        });
+      }
+    }
 
-    return [...tag1Mapped, ...tag2Mapped, ...tag3Mapped];
+    console.log(`[Tagger] 获取标签成功: Tag1=${tag1Records.length}, Tag2=${tag2Records.length}, Tag3=${tag3Records.length}`);
+    return allTags;
   } catch (error) {
     console.error('[Tagger] 获取标签失败', error);
     return [];
@@ -438,7 +489,10 @@ function normalizeTagResult(
   confidenceThreshold: number
 ): AITagResult {
   const confidence = Math.max(0, Math.min(1, raw.confidence || 0.5));
-  const reviewNeeded = confidence < confidenceThreshold || raw.tag1.length === 0 || raw.tag2.length === 0 || raw.tag3.length === 0;
+  const tag1Arr = raw.tag1 || [];
+  const tag2Arr = raw.tag2 || [];
+  const tag3Arr = raw.tag3 || [];
+  const reviewNeeded = confidence < confidenceThreshold || tag1Arr.length === 0 || tag2Arr.length === 0 || tag3Arr.length === 0;
 
   return {
     tag1: (raw.tag1 || ['未分类']).filter(Boolean),
@@ -455,9 +509,9 @@ export const tagger = {
   analyzeFeedback,
   batchAnalyzeFeedbacks,
   completeTaggingProcess,
-  ensureTagExists,
-  updateTagStatistics,
   getAllTags,
   getCachedTags,
   invalidateTagCache,
+  ensureTagExists,
+  updateTagStatistics,
 };

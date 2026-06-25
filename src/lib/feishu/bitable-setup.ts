@@ -1043,34 +1043,31 @@ export async function addBitableAdminMembers(
   adminUserIds: string | string[] | undefined
 ): Promise<{ successCount: number; failCount: number; errors: string[] }> {
   const result = { successCount: 0, failCount: 0, errors: [] as string[] };
+  if (!adminUserIds) return result;
 
-  if (!adminUserIds) {
-    console.log('[协作者] 未配置管理员，跳过添加');
-    return result;
-  }
-
-  // 解析管理员 ID 列表
   const userIds = Array.isArray(adminUserIds)
     ? adminUserIds
-    : String(adminUserIds).split(',').map((s) => s.trim()).filter(Boolean);
+    : String(adminUserIds).split(',').map(s => s.trim()).filter(Boolean);
+  if (userIds.length === 0) return result;
 
-  if (userIds.length === 0) {
-    console.log('[协作者] 管理员列表为空，跳过添加');
-    return result;
-  }
-
-  console.log(`[协作者] 开始添加 ${userIds.length} 个管理员...`);
-
-  for (const userId of userIds) {
-    const addResult = await addBitableMember(appToken, userId, 'editor');
-    if (addResult.success) {
-      result.successCount++;
-    } else {
+  const token = await getTenantAccessToken();
+  const tasks = userIds.map(async (userId) => {
+    try {
+      const res = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ member_type: 'open_id', member_id: userId, perm: 'manage' })
+      });
+      const data = await res.json();
+      if (data.code === 0 || data.code === 1432201) {
+        result.successCount++;
+      } else throw new Error(data.msg);
+    } catch (err) {
       result.failCount++;
-      result.errors.push(`${userId}: ${addResult.error}`);
+      result.errors.push(`${userId}: ${err instanceof Error ? err.message : '未知错误'}`);
     }
-  }
-
-  console.log(`[协作者] 添加完成: 成功 ${result.successCount}，失败 ${result.failCount}`);
+  });
+  // 并发执行，少量用户没问题，超过10个建议分批Promise.allSettled
+  await Promise.allSettled(tasks);
   return result;
 }

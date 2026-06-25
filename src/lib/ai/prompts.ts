@@ -78,11 +78,12 @@ export function generateBatchTaggingPrompt(
   return `你是NPS反馈分析专家。请批量分析以下${feedbacks.length}条用户反馈，为每条提取三级标签。
 
 【规则】
+0. 得根据反馈内容/评分/不满意原因/模块来源，分析并提取三级标签。
 1. Tag1 必须从以下列表中选择（可多选）：[${tag1List.join(', ')}]
 2. Tag2 是功能模块名（可多选）。优先从已有标签选择，若无匹配可创建新标签。
 3. Tag3 是具体问题描述（可多选）。从用户原话中提炼，保留用户语言。
-4. confidence 为确定性评分(0.00-1.00)。
-5. needLogCheck 为true当且仅当：反馈描述卡顿/白屏/闪退/加载失败等技术现象。
+4. confidence 为确定性评分(0.00-1.00)，描述这三个 tag 是否很符合反馈内容。
+5. needLogCheck 为true当且仅当：反馈描述卡顿/白屏/闪退/加载失败等技术现象，看起来像是 bug。
 6. 若反馈内容非中文，先将内容翻译为中文再分析，翻译结果填入 translatedContent 字段。
 
 【已有标签】
@@ -93,15 +94,17 @@ Tag3: ${tag3List.join(', ')}
 【待分析反馈】
 ${feedbackList}
 
-【输出格式】严格JSON数组，每项对应一条反馈，顺序不能乱：
-[
-  {
-    "tag1": ["性能提升"],
-    "tag2": ["打卡模块"],
-    "tag3": ["定位失败"],
-    "confidence": 0.85,
-    "needLogCheck": false,
-    "translatedContent": ""
-  }
-]`;
+【输出格式】严格JSON对象，results 为数组，每项对应一条反馈，顺序不能乱：
+{
+  "results": [
+    {
+      "tag1": ["性能提升"],
+      "tag2": ["打卡模块"],
+      "tag3": ["定位失败"],
+      "confidence": 0.85,
+      "needLogCheck": false,
+      "translatedContent": ""
+    }
+  ]
+}`;
 }

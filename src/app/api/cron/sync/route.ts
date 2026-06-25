@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { AdapterFactory } from '@/lib/data-sources/adapter-factory';
 import { LLMProviderFactory } from '@/lib/llm/provider-factory';
 import { bitableClient } from '@/lib/feishu/bitable';
+import { extractMultiSelectFieldValue } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, TENANT_FIELDS } from '@/lib/feishu/constants';
 import { feishuBot, createWeeklyReportCard } from '@/lib/feishu/bot';
 import { tagger } from '@/lib/ai/tagger';
@@ -161,6 +162,11 @@ async function runSyncTask(): Promise<SyncResult> {
  * 单用户同步（使用环境变量，向后兼容）
  */
 async function runSyncTaskSingleUser(): Promise<SyncResult> {
+  // 变量初始化（在 try 外部，确保 catch 块可访问）
+  const details: string[] = [];
+  let syncedCount = 0;
+  let failedCount = 0;
+
   try {
     // DEV_MODE: 开发阶段使用 Mock 数据
     if (process.env.CRON_DEV_MODE === 'true') {
@@ -180,11 +186,6 @@ async function runSyncTaskSingleUser(): Promise<SyncResult> {
       ]);
     };
 
-    // 非 DEV_MODE 的变量初始化
-    const details: string[] = [];
-    let syncedCount = 0;
-    let failedCount = 0;
-
     // 步骤1：拉取外部数据（多数据源适配器）
     const externalDataResult = await withTimeout(syncExternalData(), 30000, 'syncExternalData');
     if (externalDataResult > 0) {
@@ -194,6 +195,7 @@ async function runSyncTaskSingleUser(): Promise<SyncResult> {
 
     // 步骤2：对未打标的反馈进行AI批量打标
     const tagResult = await withTimeout(autoTagFeedbacks(50), 30000, 'autoTagFeedbacks');
+    console.log('==============================>hxytagResult == ', tagResult)
     if (tagResult > 0) {
       details.push(`AI自动打标 ${tagResult} 条反馈`);
       syncedCount += tagResult;
@@ -279,7 +281,7 @@ async function runSyncTaskForUser(ownerId: string): Promise<SyncResult> {
     if (tagResult > 0) {
       syncedCount += tagResult;
     }
-
+console.log('==============================>hxy2 == ', 2)
     await generateDailyReport();
     const notifOk = await sendNotification(syncedCount);
     if (notifOk) {
@@ -398,7 +400,7 @@ async function syncExternalData(): Promise<number> {
  */
 async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
   try {
-    // 获取所有记录（飞书 filter API 格式问题，改为代码过滤）
+    // 获取所有记录（listRecords 已自动处理分页）
     const allRecords = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
       pageSize: 500,
     });
@@ -406,8 +408,10 @@ async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
     // 代码过滤：只处理状态为 '未打标' 的记录
     const untaggedRecords = allRecords.filter((r) => {
       const status = String(r.fields[FEEDBACK_FIELDS.STATUS] || '');
-      return status === '未打标';
+      return status !== '已打标';
     });
+
+    console.log('==============================>hxyuntaggedRecords == ', untaggedRecords)
 
     if (untaggedRecords.length === 0) {
       console.log('[Cron] 没有需要打标的反馈');
@@ -452,17 +456,18 @@ async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
       console.log(`[Cron] 批次 ${batchNum} AI分析完成 (${elapsed}ms, 成功 ${batchSuccess}/${results.length})`);
 
       // 批量更新飞书
+      // MultiSelect 字段需要传入字符串数组，过滤空字符串，确保格式正确
       const updates = results
         .filter(r => r.success && r.result)
         .map(r => ({
           record_id: r.recordId,
           fields: {
-            [FEEDBACK_FIELDS.TAG1]: r.result!.tag1,
-            [FEEDBACK_FIELDS.TAG2]: r.result!.tag2,
-            [FEEDBACK_FIELDS.TAG3]: r.result!.tag3,
+            [FEEDBACK_FIELDS.TAG1]: (r.result!.tag1 || []).filter(t => t),
+            [FEEDBACK_FIELDS.TAG2]: (r.result!.tag2 || []).filter(t => t),
+            [FEEDBACK_FIELDS.TAG3]: (r.result!.tag3 || []).filter(t => t),
             [FEEDBACK_FIELDS.CONFIDENCE]: r.result!.confidence,
-            [FEEDBACK_FIELDS.NEED_LOG_CHECK]: r.result!.needLogCheck,
-            [FEEDBACK_FIELDS.REVIEW_NEEDED]: r.result!.reviewNeeded,
+            [FEEDBACK_FIELDS.NEED_LOG_CHECK]: r.result!.needLogCheck ? '是' : '否',
+            [FEEDBACK_FIELDS.REVIEW_NEEDED]: r.result!.reviewNeeded ? '是' : '否',
             [FEEDBACK_FIELDS.TRANSLATED_CONTENT]: r.result!.translatedContent || '',
             [FEEDBACK_FIELDS.STATUS]: '已打标',
           },
@@ -496,7 +501,7 @@ async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
 
         for (const tag1 of result.result.tag1) {
           try {
-            await tagger.ensureTagExists(tag1, null, null, 'tag1');
+            await tagger.ensureTagExists(tag1, 'tag1');
             await tagger.updateTagStatistics(tag1, 'tag1', tenantScale, npsScore);
           } catch (tagErr) {
             console.error(`[Cron] 更新Tag1失败 ${tag1}:`, tagErr);
@@ -505,7 +510,7 @@ async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
 
         for (const tag2 of result.result.tag2) {
           try {
-            await tagger.ensureTagExists(null, tag2, null, 'tag2');
+            await tagger.ensureTagExists(tag2, 'tag2');
             await tagger.updateTagStatistics(tag2, 'tag2', tenantScale, npsScore);
           } catch (tagErr) {
             console.error(`[Cron] 更新Tag2失败 ${tag2}:`, tagErr);
@@ -514,7 +519,7 @@ async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
 
         for (const tag3 of result.result.tag3) {
           try {
-            await tagger.ensureTagExists(null, null, tag3, 'tag3');
+            await tagger.ensureTagExists(tag3, 'tag3');
             await tagger.updateTagStatistics(tag3, 'tag3', tenantScale, npsScore);
           } catch (tagErr) {
             console.error(`[Cron] 更新Tag3失败 ${tag3}:`, tagErr);
@@ -630,18 +635,22 @@ async function sendNotification(syncedCount: number): Promise<boolean> {
       }
 
       const reviewNeeded =
-        String(fields[FEEDBACK_FIELDS.REVIEW_NEEDED] || '').toLowerCase() ===
-          'true' || fields[FEEDBACK_FIELDS.REVIEW_NEEDED] === true
+        String(fields[FEEDBACK_FIELDS.REVIEW_NEEDED] || '').toLowerCase() === '是' ||
+        String(fields[FEEDBACK_FIELDS.REVIEW_NEEDED] || '').toLowerCase() === 'true' ||
+        fields[FEEDBACK_FIELDS.REVIEW_NEEDED] === true
       const needLog =
-        String(fields[FEEDBACK_FIELDS.NEED_LOG_CHECK] || '').toLowerCase() ===
-          'true' || fields[FEEDBACK_FIELDS.NEED_LOG_CHECK] === true
+        String(fields[FEEDBACK_FIELDS.NEED_LOG_CHECK] || '').toLowerCase() === '是' ||
+        String(fields[FEEDBACK_FIELDS.NEED_LOG_CHECK] || '').toLowerCase() === 'true' ||
+        fields[FEEDBACK_FIELDS.NEED_LOG_CHECK] === true
       if (reviewNeeded) reviewCount++
       if (needLog) needLogCheckCount++
 
-      // 统计Tag3频次
-      const tag3Val = String(fields[FEEDBACK_FIELDS.TAG3] || '')
-      if (tag3Val) {
-        tag3Counts.set(tag3Val, (tag3Counts.get(tag3Val) || 0) + 1)
+      // 统计Tag3频次（MultiSelect 字段，可能有多个值）
+      const tag3Arr = extractMultiSelectFieldValue(fields[FEEDBACK_FIELDS.TAG3])
+      for (const tag3 of tag3Arr) {
+        if (tag3) {
+          tag3Counts.set(tag3, (tag3Counts.get(tag3) || 0) + 1)
+        }
       }
 
       // 统计评分
@@ -870,7 +879,9 @@ async function getExistingFeedbackIds(startDate: Date, endDate: Date): Promise<S
  */
 async function generateWeeklyDoc(): Promise<boolean> {
   try {
-    const baseUrl = process.env.VERCEL_URL || 'http://localhost:3000';
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const url = `${baseUrl}/api/documents/weekly`;
 
     const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -881,6 +892,7 @@ async function generateWeeklyDoc(): Promise<boolean> {
     const response = await fetch(url, {
       method: 'POST',
       headers: authHeaders,
+      body: JSON.stringify({}),
     });
 
     if (!response.ok) {
@@ -957,7 +969,8 @@ async function runSyncWithMockData(): Promise<SyncResult> {
 
     // AI 打标：对刚写入的 Mock 数据进行真实 AI 打标
     console.log('[Cron DEV] 开始 AI 打标...');
-    const tagResult = await autoTagFeedbacks(50);
+    const tagResult = await autoTagFeedbacks(20);
+    console.log('==============================>hxy3 == ', 3)
     if (tagResult > 0) {
       details.push(`[Mock] AI 打标完成 ${tagResult} 条反馈`);
       console.log(`[Cron DEV] AI 打标完成: ${tagResult} 条`);
