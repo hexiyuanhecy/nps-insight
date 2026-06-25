@@ -38,36 +38,31 @@ export type TableName = typeof TABLE_NAMES[keyof typeof TABLE_NAMES];
 
 /** 反馈表字段名 —— 与实际飞书表格字段对应 */
 export const FEEDBACK_FIELDS = {
-  FEEDBACK_ID: 'feedbackId',
-  TENANT_ID: 'tenantId',
-  TENANT_NAME: 'tenantName',
-  TENANT_SCALE: 'tenantScale',
-  USER_ID: 'userId',
-  USER_NAME: 'userName',
-  CREATE_TIME: 'createTime',
-  UNSATISFACTION_REASON: 'module',
+  FEEDBACK_ID: '反馈ID',
+  TENANT_ID: '租户ID',
+  TENANT_NAME: '租户名称',
+  TENANT_SCALE: '租户规模',
+  USER_ID: '用户ID',
+  CREATE_TIME: '创建时间',
+  UNSATISFACTION_REASON: '不满意原因',
   CONTENT: '反馈原文',
-  TRANSLATED_CONTENT: 'translatedContent',
-  NPS_SCORE: 'npsScore',
-  SOURCE: '反馈平台',
+  TRANSLATED_CONTENT: '翻译后文本',
   TAG1: 'tag1',
   TAG2: 'tag2',
   TAG3: 'tag3',
-  CONFIDENCE: 'confidence',
-  NEED_LOG_CHECK: 'needLogCheck',
-  REVIEW_NEEDED: 'reviewNeeded',
-  STATUS: 'status',
-  TAG_TIME: 'tagTime',
-  SUMMARY: 'summary',
-  SUGGESTIONS: 'suggestions',
-  PRIORITY: 'priority',
+  NPS_SCORE: '评分',
+  SOURCE: '反馈平台',
+  CONFIDENCE: 'AI 置信度',
+  NEED_LOG_CHECK: '需查日志',
+  REVIEW_NEEDED: '待审核',
+  STATUS: '打标状态',
 } as const;
 
-/** 反馈表字段定义（用于自动建表）—— 与PRD v6.0 严格对应 */
+/** 反馈表字段定义（用于自动建表）—— 与目标多维表格"反馈列表"表严格对齐 */
 export const FEEDBACK_FIELD_DEFS: BitableField[] = [
   { field_name: FEEDBACK_FIELDS.FEEDBACK_ID, field_type: 'Text' },
   { field_name: FEEDBACK_FIELDS.TENANT_ID, field_type: 'Text' },
-  { field_name: FEEDBACK_FIELDS.TENANT_NAME, field_type: 'Text' },
+  { field_name: FEEDBACK_FIELDS.TENANT_NAME, field_type: 'AutoNumber' },
   {
     field_name: FEEDBACK_FIELDS.TENANT_SCALE,
     field_type: 'SingleSelect',
@@ -83,7 +78,6 @@ export const FEEDBACK_FIELD_DEFS: BitableField[] = [
     },
   },
   { field_name: FEEDBACK_FIELDS.USER_ID, field_type: 'Text' },
-  { field_name: FEEDBACK_FIELDS.USER_NAME, field_type: 'Text' },
   { field_name: FEEDBACK_FIELDS.CREATE_TIME, field_type: 'DateTime', property: { date_formatter: 'yyyy/MM/dd' } },
   {
     field_name: FEEDBACK_FIELDS.UNSATISFACTION_REASON,
@@ -101,14 +95,83 @@ export const FEEDBACK_FIELD_DEFS: BitableField[] = [
   },
   { field_name: FEEDBACK_FIELDS.CONTENT, field_type: 'Text' },
   { field_name: FEEDBACK_FIELDS.TRANSLATED_CONTENT, field_type: 'Text' },
-  { field_name: FEEDBACK_FIELDS.NPS_SCORE, field_type: 'Number' },
-  { field_name: FEEDBACK_FIELDS.SOURCE, field_type: 'Text' },
-  { field_name: FEEDBACK_FIELDS.TAG1, field_type: 'MultiSelect' },
-  { field_name: FEEDBACK_FIELDS.TAG2, field_type: 'MultiSelect' },
-  { field_name: FEEDBACK_FIELDS.TAG3, field_type: 'MultiSelect' },
-  { field_name: FEEDBACK_FIELDS.CONFIDENCE, field_type: 'Number' },
-  { field_name: FEEDBACK_FIELDS.NEED_LOG_CHECK, field_type: 'Checkbox' },
-  { field_name: FEEDBACK_FIELDS.REVIEW_NEEDED, field_type: 'Checkbox' },
+  {
+    field_name: FEEDBACK_FIELDS.TAG1,
+    field_type: 'MultiSelect',
+    property: {
+      options: [
+        { name: '疑似Bug', color: 0 },
+        { name: '功能优化', color: 1 },
+        { name: '界面改进', color: 2 },
+        { name: '性能提升', color: 3 },
+        { name: '用户教育', color: 4 },
+        { name: '安全合规', color: 5 },
+        { name: '无效反馈', color: 6 },
+        { name: '细节优化', color: 7 },
+      ],
+    },
+  },
+  {
+    field_name: FEEDBACK_FIELDS.TAG2,
+    field_type: 'MultiSelect',
+    property: {
+      options: [
+        { name: '通用体验', color: 0 },
+        { name: '稳定性', color: 1 },
+        { name: '性能', color: 2 },
+        { name: 'UI/UX', color: 3 },
+        { name: '易用性', color: 4 },
+        { name: '竞争力', color: 5 },
+        { name: '满意度', color: 6 },
+        { name: '功能性', color: 7 },
+        { name: '体验优化', color: 8 },
+        { name: '产品竞争力', color: 9 },
+        { name: '用户体验', color: 0 },
+        { name: '产品优化', color: 1 },
+        { name: '功能价值', color: 2 },
+        { name: 'UI/UX设计', color: 3 },
+        { name: '竞品对比', color: 4 },
+        { name: '整体体验', color: 5 },
+        { name: '整体稳定性', color: 6 },
+        { name: 'UI设计', color: 7 },
+        { name: '产品体验', color: 8 },
+        { name: '细节优化', color: 9 },
+        { name: '功能实用性', color: 0 },
+        { name: '细节体验', color: 1 },
+        { name: '系统稳定性', color: 2 },
+        { name: '功能稳定性', color: 3 },
+        { name: '价值认可', color: 4 },
+        { name: '性能表现', color: 5 },
+        { name: '功能体验', color: 6 },
+        { name: '市场竞争力', color: 7 },
+      ],
+    },
+  },
+  {
+    field_name: FEEDBACK_FIELDS.TAG3,
+    field_type: 'MultiSelect',
+    property: {
+      options: [
+        { name: '不好用', color: 0 },
+        { name: '太卡', color: 1 },
+      ],
+    },
+  },
+  { field_name: FEEDBACK_FIELDS.NPS_SCORE, field_type: 'Number', property: { formatter: '0.0' } },
+  {
+    field_name: FEEDBACK_FIELDS.SOURCE,
+    field_type: 'SingleSelect',
+    property: {
+      options: [
+        { name: '管理后台', color: 0 },
+        { name: '请假员工端', color: 1 },
+        { name: '打卡小程序', color: 2 },
+      ],
+    },
+  },
+  { field_name: FEEDBACK_FIELDS.CONFIDENCE, field_type: 'Number', property: { formatter: '0.0' } },
+  { field_name: FEEDBACK_FIELDS.NEED_LOG_CHECK, field_type: 'Textarea' },
+  { field_name: FEEDBACK_FIELDS.REVIEW_NEEDED, field_type: 'Textarea' },
   {
     field_name: FEEDBACK_FIELDS.STATUS,
     field_type: 'SingleSelect',
@@ -119,7 +182,6 @@ export const FEEDBACK_FIELD_DEFS: BitableField[] = [
       ],
     },
   },
-  { field_name: FEEDBACK_FIELDS.TAG_TIME, field_type: 'DateTime', property: { date_formatter: 'yyyy/MM/dd HH:mm' } },
 ];
 
 // ============================================
@@ -129,36 +191,17 @@ export const FEEDBACK_FIELD_DEFS: BitableField[] = [
 /** 标签表字段名 — 与多维表格实际字段严格对应 */
 export const TAG_FIELDS = {
   TAG_ID: 'tagId',
-  TAG1_NAME: 'Tag1名称',
-  TAG2_NAME: 'Tag2名称',
-  TAG3_NAME: 'Tag3名称',
-  USAGE_COUNT: '使用次数',
-  DEFINITION: '定义',
-  STATUS: '状态',
-  CREATED_BY: '创建人',
-  CREATED_AT: '创建时间',
+  TAG_NAME: 'tagName',
+  DESC: 'desc',
+  COUNT: 'count',
 } as const;
 
 /** 标签表字段定义（用于自动建表） */
 export const TAG_FIELD_DEFS: BitableField[] = [
   { field_name: 'tagId', field_type: 'Text' },
-  { field_name: 'Tag1名称', field_type: 'Text' },
-  { field_name: 'Tag2名称', field_type: 'Text' },
-  { field_name: 'Tag3名称', field_type: 'Text' },
-  { field_name: '使用次数', field_type: 'Number' },
-  { field_name: '定义', field_type: 'Text' },
-  {
-    field_name: '状态',
-    field_type: 'SingleSelect',
-    property: {
-      options: [
-        { name: 'active', color: 0 },
-        { name: 'inactive', color: 1 },
-      ],
-    },
-  },
-  { field_name: '创建人', field_type: 'Text' },
-  { field_name: '创建时间', field_type: 'DateTime' },
+  { field_name: 'tagName', field_type: 'Text' },
+  { field_name: 'desc', field_type: 'Text' },
+  { field_name: 'count', field_type: 'AutoNumber' },
 ];
 
 // ============================================
@@ -170,12 +213,9 @@ export const TENANT_FIELDS = {
   TENANT_ID: '租户ID',
   TENANT_NAME: '租户名称',
   SCALE: '规模',
+  IS_ENTERPRISE: '是否企业版',
   CONTACT: '联系人',
   CONTACT_EMAIL: '联系邮箱',
-  LOG_PLATFORM: '日志平台',
-  LOG_ENDPOINT: '日志端点',
-  LOG_CREDENTIALS: '日志凭证',
-  CREATED_AT: '创建时间',
 } as const;
 
 /** 租户表字段定义（用于自动建表） */
@@ -196,58 +236,86 @@ export const TENANT_FIELD_DEFS: BitableField[] = [
       ],
     },
   },
+  { field_name: '是否企业版', field_type: 'Textarea' },
   { field_name: '联系人', field_type: 'Text' },
   { field_name: '联系邮箱', field_type: 'Text' },
-  { field_name: '日志平台', field_type: 'Text' },
-  { field_name: '日志端点', field_type: 'Text' },
-  { field_name: '日志凭证', field_type: 'Text' },
-  { field_name: '创建时间', field_type: 'DateTime' },
 ];
 
 // ============================================
 // 周期分析表字段定义
 // ============================================
 
-/** Top问题表字段名 —— 与PRD v6.0 严格对应 */
+/** Top问题表字段名 —— 与目标多维表格"top 问题表"严格对应（共15个字段） */
 export const TOP_ISSUES_FIELDS = {
-  TAG2_NAME: '所属模块',
-  TAG3_NAMES: '具体问题',
-  ISSUE_KEY: '问题标识',
+  INDEX: 'index',
+  MODULE: '所属模块',
+  TAG2: 'tag2',
+  TAG3: 'tag3',
   TOTAL_COUNT: '总反馈数',
-  PERIOD_NEW_COUNT: '本周期新增',
   A4_COUNT: 'A4反馈数',
   A5_COUNT: 'A5反馈数',
   A6_COUNT: 'A6反馈数',
   LARGE_TENANT_COUNT: '大租户反馈数',
   LARGE_TENANT_RATIO: '大租户占比',
-  AVG_SCORE: '平均分',
   MANUAL_PRIORITY: '人工排序',
   OWNER: '负责人',
   RESOLUTION: '解决方案',
-  ITERATION_PERIOD: '迭代周期',
   STATUS: '状态',
+  ITERATION_PERIOD: '迭代周期',
 } as const;
 
-/** Top问题表字段定义（用于自动建表）—— PRD v2 要求关联引用 */
+/** Top问题表字段定义（用于自动建表）—— 与目标多维表格"top 问题表"严格对齐（共15个字段） */
 export const TOP_ISSUES_FIELD_DEFS: BitableField[] = [
-  // 所属模块：关联引用 Tag2 表（单选）
-  { field_name: '所属模块', field_type: 'SingleLink', property: { foreign_table_id: '' } },
-  // 具体问题：关联引用 Tag3 表（多选）
-  { field_name: '具体问题', field_type: 'MultiLink', property: { foreign_table_id: '' } },
-  { field_name: '问题标识', field_type: 'Text' },
-  { field_name: '总反馈数', field_type: 'Number' },
-  { field_name: '本周期新增', field_type: 'Number' },
-  { field_name: 'A4反馈数', field_type: 'Number' },
-  { field_name: 'A5反馈数', field_type: 'Number' },
-  { field_name: 'A6反馈数', field_type: 'Number' },
-  { field_name: '大租户反馈数', field_type: 'Number' },
-  { field_name: '大租户占比', field_type: 'Number' },
-  { field_name: '平均分', field_type: 'Number' },
-  { field_name: '人工排序', field_type: 'Number' },
-  { field_name: '负责人', field_type: 'Text' },
-  { field_name: '解决方案', field_type: 'Text' },
+  { field_name: TOP_ISSUES_FIELDS.INDEX, field_type: 'Text' },
+  { field_name: TOP_ISSUES_FIELDS.MODULE, field_type: 'AutoNumber' },
   {
-    field_name: '状态',
+    field_name: TOP_ISSUES_FIELDS.TAG2,
+    field_type: 'SingleSelect',
+    property: {
+      options: [
+        { name: '通用体验', color: 0 },
+        { name: '稳定性', color: 1 },
+        { name: '性能', color: 2 },
+        { name: 'UI/UX', color: 3 },
+        { name: '易用性', color: 4 },
+        { name: '竞争力', color: 5 },
+        { name: '满意度', color: 6 },
+        { name: '功能性', color: 7 },
+        { name: '体验优化', color: 8 },
+        { name: '产品竞争力', color: 9 },
+        { name: '用户体验', color: 0 },
+        { name: '产品优化', color: 1 },
+        { name: '功能价值', color: 2 },
+        { name: 'UI/UX设计', color: 3 },
+        { name: '竞品对比', color: 4 },
+        { name: '整体体验', color: 5 },
+        { name: '整体稳定性', color: 6 },
+        { name: 'UI设计', color: 7 },
+        { name: '产品体验', color: 8 },
+        { name: '细节优化', color: 9 },
+        { name: '功能实用性', color: 0 },
+        { name: '细节体验', color: 1 },
+        { name: '系统稳定性', color: 2 },
+        { name: '功能稳定性', color: 3 },
+        { name: '价值认可', color: 4 },
+        { name: '性能表现', color: 5 },
+        { name: '功能体验', color: 6 },
+        { name: '市场竞争力', color: 7 },
+      ],
+    },
+  },
+  { field_name: TOP_ISSUES_FIELDS.TAG3, field_type: 'AutoNumber' },
+  { field_name: TOP_ISSUES_FIELDS.TOTAL_COUNT, field_type: 'AutoNumber' },
+  { field_name: TOP_ISSUES_FIELDS.A4_COUNT, field_type: 'AutoNumber' },
+  { field_name: TOP_ISSUES_FIELDS.A5_COUNT, field_type: 'AutoNumber' },
+  { field_name: TOP_ISSUES_FIELDS.A6_COUNT, field_type: 'AutoNumber' },
+  { field_name: TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT, field_type: 'AutoNumber' },
+  { field_name: TOP_ISSUES_FIELDS.LARGE_TENANT_RATIO, field_type: 'Formula' },
+  { field_name: TOP_ISSUES_FIELDS.MANUAL_PRIORITY, field_type: 'Number', property: { formatter: '0.0' } },
+  { field_name: TOP_ISSUES_FIELDS.OWNER, field_type: 'Text' },
+  { field_name: TOP_ISSUES_FIELDS.RESOLUTION, field_type: 'Text' },
+  {
+    field_name: TOP_ISSUES_FIELDS.STATUS,
     field_type: 'SingleSelect',
     property: {
       options: [
@@ -259,7 +327,7 @@ export const TOP_ISSUES_FIELD_DEFS: BitableField[] = [
     },
   },
   {
-    field_name: '迭代周期',
+    field_name: TOP_ISSUES_FIELDS.ITERATION_PERIOD,
     field_type: 'SingleSelect',
     property: {
       options: [
@@ -278,24 +346,30 @@ export const TOP_ISSUES_FIELD_DEFS: BitableField[] = [
 
 export const TAG1_FIELDS = {
   TAG_ID: 'tagId',
-  NAME: '名称',
-  DEFINITION: '定义',
-  USAGE_COUNT: '使用次数',
-  LARGE_TENANT_COUNT: '大租户数',
-  LARGE_TENANT_RATIO: '大租户占比',
-  STATUS: '状态',
-  CREATED_BY: '创建人',
-  CREATED_AT: '创建时间',
+  TAG_NAME: 'tagName',
+  DESC: 'desc',
+  COUNT: 'count',
 } as const;
 
 export const TAG1_FIELD_DEFS: BitableField[] = [
-{ field_name: 'tagId', field_type: 'Text' },
-{ field_name: '名称', field_type: 'Text' },
-{ field_name: '定义', field_type: 'Text' },
-{ field_name: '使用次数', field_type: 'Number' },
-{ field_name: '大租户数', field_type: 'Number' },
-{ field_name: '大租户占比', field_type: 'Number' },
-{ field_name: '平均分', field_type: 'Number' },
+  { field_name: 'tagId', field_type: 'Text' },
+  {
+    field_name: 'tagName',
+    field_type: 'SingleSelect',
+    property: {
+      options: [
+        { name: '疑似Bug', color: 0 },
+        { name: '功能优化', color: 1 },
+        { name: '界面改进', color: 2 },
+        { name: '性能提升', color: 3 },
+        { name: '用户教育', color: 4 },
+        { name: '安全合规', color: 5 },
+        { name: '无效反馈', color: 6 },
+      ],
+    },
+  },
+  { field_name: 'desc', field_type: 'Text' },
+  { field_name: 'count', field_type: 'AutoNumber' },
 ];
 
 // ============================================
@@ -304,24 +378,51 @@ export const TAG1_FIELD_DEFS: BitableField[] = [
 
 export const TAG2_FIELDS = {
   TAG_ID: 'tagId',
-  NAME: '名称',
-  PARENT_TAG1: '所属一级标签',
-  USAGE_COUNT: '使用次数',
-  LARGE_TENANT_COUNT: '大租户数',
-  LARGE_TENANT_RATIO: '大租户占比',
-  AVG_SCORE: '平均分',
-  TAG3_COUNT: 'Tag3数量',
+  TAG_NAME: 'tagName',
+  DESC: 'desc',
+  COUNT: 'count',
 } as const;
 
 export const TAG2_FIELD_DEFS: BitableField[] = [
-{ field_name: 'tagId', field_type: 'Text' },
-{ field_name: '名称', field_type: 'Text' },
-{ field_name: '所属一级标签', field_type: 'Text' },
-{ field_name: '使用次数', field_type: 'Number' },
-{ field_name: '大租户数', field_type: 'Number' },
-{ field_name: '大租户占比', field_type: 'Number' },
-{ field_name: '平均分', field_type: 'Number' },
-{ field_name: 'Tag3数量', field_type: 'Number' },
+  { field_name: 'tagId', field_type: 'Text' },
+  {
+    field_name: 'tagName',
+    field_type: 'SingleSelect',
+    property: {
+      options: [
+        { name: '通用体验', color: 0 },
+        { name: '稳定性', color: 1 },
+        { name: '性能', color: 2 },
+        { name: 'UI/UX', color: 3 },
+        { name: '易用性', color: 4 },
+        { name: '竞争力', color: 5 },
+        { name: '满意度', color: 6 },
+        { name: '功能性', color: 7 },
+        { name: '体验优化', color: 8 },
+        { name: '产品竞争力', color: 9 },
+        { name: '用户体验', color: 0 },
+        { name: '产品优化', color: 1 },
+        { name: '功能价值', color: 2 },
+        { name: 'UI/UX设计', color: 3 },
+        { name: '竞品对比', color: 4 },
+        { name: '整体体验', color: 5 },
+        { name: '整体稳定性', color: 6 },
+        { name: 'UI设计', color: 7 },
+        { name: '产品体验', color: 8 },
+        { name: '细节优化', color: 9 },
+        { name: '功能实用性', color: 0 },
+        { name: '细节体验', color: 1 },
+        { name: '系统稳定性', color: 2 },
+        { name: '功能稳定性', color: 3 },
+        { name: '价值认可', color: 4 },
+        { name: '性能表现', color: 5 },
+        { name: '功能体验', color: 6 },
+        { name: '市场竞争力', color: 7 },
+      ],
+    },
+  },
+  { field_name: 'desc', field_type: 'Text' },
+  { field_name: 'count', field_type: 'AutoNumber' },
 ];
 
 // ============================================
@@ -330,22 +431,25 @@ export const TAG2_FIELD_DEFS: BitableField[] = [
 
 export const TAG3_FIELDS = {
   TAG_ID: 'tagId',
-  NAME: '名称',
-  PARENT_TAG2: '所属二级标签',
-  USAGE_COUNT: '使用次数',
-  LARGE_TENANT_COUNT: '大租户数',
-  LARGE_TENANT_RATIO: '大租户占比',
-  AVG_SCORE: '平均分',
+  TAG_NAME: 'tagName',
+  DESC: 'desc',
+  COUNT: 'count',
 } as const;
 
 export const TAG3_FIELD_DEFS: BitableField[] = [
-{ field_name: 'tagId', field_type: 'Text' },
-{ field_name: '名称', field_type: 'Text' },
-{ field_name: '所属二级标签', field_type: 'Text' },
-{ field_name: '使用次数', field_type: 'Number' },
-{ field_name: '大租户数', field_type: 'Number' },
-{ field_name: '大租户占比', field_type: 'Number' },
-{ field_name: '平均分', field_type: 'Number' },
+  { field_name: 'tagId', field_type: 'Text' },
+  {
+    field_name: 'tagName',
+    field_type: 'SingleSelect',
+    property: {
+      options: [
+        { name: '不好用', color: 0 },
+        { name: '太卡', color: 1 },
+      ],
+    },
+  },
+  { field_name: 'desc', field_type: 'Text' },
+  { field_name: 'count', field_type: 'AutoNumber' },
 ];
 // ============================================
 // 表结构汇总（用于自动建表）
