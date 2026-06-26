@@ -1,4 +1,4 @@
-import { Bell, Calendar, Clock, PlayCircle, Save } from 'lucide-react';
+import { Bell, Calendar, Clock, PlayCircle, Save, Zap, BarChart3 } from 'lucide-react';
 import { buildCronFromSchedule } from '@/components/admin/config-center/schedule-utils';
 import type { ConfigCenterController } from '@/components/admin/config-center/use-config-center';
 import type { ScheduleUnit } from '@/components/admin/config-center/types';
@@ -153,8 +153,37 @@ export function OpsTab({ ctrl }: OpsTabProps) {
           <p className="mt-1 text-xs text-slate-500">自动生成 Top 问题表与会议文档</p>
         </div>
 
+        {/* 手动触发任务 */}
+        <div className="mt-6 rounded-lg border border-blue-100 bg-blue-50/50 p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Zap className="h-4 w-4 text-blue-600" />
+            <span className="text-sm font-medium text-slate-700">手动触发任务</span>
+            <span className="text-xs text-slate-500">（点击后请查看浏览器控制台和终端日志）</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <PrimaryButton
+              onClick={ctrl.runWeeklyTagging}
+              loading={ctrl.isLoading}
+              icon={<PlayCircle className="h-4 w-4" />}
+            >
+              开始周打标
+            </PrimaryButton>
+            <PrimaryButton
+              onClick={ctrl.runMonthlyAnalysis}
+              loading={ctrl.isLoading}
+              icon={<BarChart3 className="h-4 w-4" />}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              开始月分析
+            </PrimaryButton>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            周打标：拉取反馈 + AI 打标 + Bot 通知 + 生成周报文档 &nbsp;|&nbsp;
+            月分析：标签自进化 + Top问题生成 + 公式同步 + 会议文档 + 通知
+          </p>
+        </div>
+
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <PrimaryButton onClick={ctrl.runManualSync} loading={ctrl.isLoading} icon={<PlayCircle className="h-4 w-4" />}>立即执行一次同步</PrimaryButton>
           <PrimaryButton onClick={ctrl.persistScheduleAndSave} loading={ctrl.isLoading} icon={<Save className="h-4 w-4" />}>保存定时任务配置</PrimaryButton>
           <span className="text-xs text-slate-500">立即拉取数据、打标并更新分析结果</span>
         </div>

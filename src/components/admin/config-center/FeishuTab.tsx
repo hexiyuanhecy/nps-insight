@@ -1,4 +1,4 @@
-import { Bell, Link, Plus, Save, Sparkles, TestTube } from 'lucide-react';
+import { BarChart3, Bell, Link, PlayCircle, Plus, Save, Sparkles, TestTube } from 'lucide-react';
 import type { ConfigCenterController } from '@/components/admin/config-center/use-config-center';
 import {
   CollapsiblePanel,
@@ -54,6 +54,21 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
           <div className="flex items-center gap-3">
             <SecondaryButton onClick={ctrl.testFeishu} loading={ctrl.isLoading} icon={<TestTube className="h-4 w-4" />}>测试飞书连接</SecondaryButton>
             <PrimaryButton onClick={() => ctrl.saveSectionConfig('飞书应用绑定')} loading={ctrl.isLoading} icon={<Save className="h-4 w-4" />}>保存配置</PrimaryButton>
+            <PrimaryButton
+              onClick={ctrl.runWeeklyTagging}
+              loading={ctrl.isLoading}
+              icon={<PlayCircle className="h-4 w-4" />}
+            >
+              开始周打标
+            </PrimaryButton>
+            <PrimaryButton
+              onClick={ctrl.runMonthlyAnalysis}
+              loading={ctrl.isLoading}
+              icon={<BarChart3 className="h-4 w-4" />}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              开始月分析
+            </PrimaryButton>
           </div>
         </div>
       </section>

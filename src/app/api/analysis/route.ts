@@ -24,15 +24,18 @@ export async function GET(request: NextRequest) {
     });
 
     const issues = records.map((record) => ({
-      tag2Name: extractFieldValue(record.fields[TOP_ISSUES_FIELDS.TAG2_NAME]),
-      tag3Names: record.fields[TOP_ISSUES_FIELDS.TAG3_NAMES] || [],
-      issueKey: extractFieldValue(record.fields[TOP_ISSUES_FIELDS.ISSUE_KEY]),
+      tag2: extractFieldValue(record.fields[TOP_ISSUES_FIELDS.TAG2]),
       totalCount: Number(record.fields[TOP_ISSUES_FIELDS.TOTAL_COUNT] || 0),
-      periodNewCount: Number(record.fields[TOP_ISSUES_FIELDS.PERIOD_NEW_COUNT] || 0),
+      a4Count: Number(record.fields[TOP_ISSUES_FIELDS.A4_COUNT] || 0),
+      a5Count: Number(record.fields[TOP_ISSUES_FIELDS.A5_COUNT] || 0),
+      a6Count: Number(record.fields[TOP_ISSUES_FIELDS.A6_COUNT] || 0),
       largeTenantCount: Number(record.fields[TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT] || 0),
       largeTenantRatio: Number(record.fields[TOP_ISSUES_FIELDS.LARGE_TENANT_RATIO] || 0),
-      avgScore: Number(record.fields[TOP_ISSUES_FIELDS.AVG_SCORE] || 0),
+      manualPriority: Number(record.fields[TOP_ISSUES_FIELDS.MANUAL_PRIORITY] || 0),
+      owner: extractFieldValue(record.fields[TOP_ISSUES_FIELDS.OWNER]),
+      resolution: extractFieldValue(record.fields[TOP_ISSUES_FIELDS.RESOLUTION]),
       status: extractFieldValue(record.fields[TOP_ISSUES_FIELDS.STATUS]),
+      iterationPeriod: extractFieldValue(record.fields[TOP_ISSUES_FIELDS.ITERATION_PERIOD]),
       recordId: record.record_id,
     }));
 

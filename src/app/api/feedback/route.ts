@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { bitableClient, extractFieldValue } from '@/lib/feishu/bitable';
+import { bitableClient, extractFieldValue, extractMultiSelectFieldValue } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
 import {
   Feedback,
@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body: CreateFeedbackRequest & { autoTag?: boolean } = await request.json();
-    const { tenantId, userId, userName, content, npsScore, source, autoTag = true } = body;
+    const { tenantId, userId, content, npsScore, source, autoTag = true } = body;
 
     // 参数校验
     if (!tenantId || !content || npsScore === undefined) {
@@ -118,7 +118,6 @@ export async function POST(request: NextRequest) {
       [FEEDBACK_FIELDS.FEEDBACK_ID]: feedbackId,
       [FEEDBACK_FIELDS.TENANT_ID]: tenantId,
       [FEEDBACK_FIELDS.USER_ID]: userId || '',
-      [FEEDBACK_FIELDS.USER_NAME]: userName || '',
       [FEEDBACK_FIELDS.CREATE_TIME]: now,
       [FEEDBACK_FIELDS.CONTENT]: content,
       [FEEDBACK_FIELDS.NPS_SCORE]: npsScore,
@@ -140,12 +139,11 @@ export async function POST(request: NextRequest) {
           0.8 // confidenceThreshold
         );
 
-        // 更新字段（只写表中存在的字段，字段名严格对应：Tag1/Tag2/Tag3 大写 T）
-        fields[FEEDBACK_FIELDS.TAG1] = analysisResult.tag1 || '';
-        fields[FEEDBACK_FIELDS.TAG2] = analysisResult.tag2 || '';
-        fields[FEEDBACK_FIELDS.TAG3] = analysisResult.tag3 || '';
+        // 更新字段（MultiSelect 字段需要传入字符串数组，过滤空字符串）
+        fields[FEEDBACK_FIELDS.TAG1] = (analysisResult.tag1 || []).filter(t => t);
+        fields[FEEDBACK_FIELDS.TAG2] = (analysisResult.tag2 || []).filter(t => t);
+        fields[FEEDBACK_FIELDS.TAG3] = (analysisResult.tag3 || []).filter(t => t);
         fields[FEEDBACK_FIELDS.CONFIDENCE] = analysisResult.confidence ?? 0.8;
-        fields[FEEDBACK_FIELDS.TAG_TIME] = now;
 
         console.log(`[API] 反馈 ${feedbackId} AI打标完成`);
       } catch (aiError) {
@@ -195,9 +193,19 @@ export async function PUT(request: NextRequest) {
     // 构建更新字段
     const fields: Record<string, unknown> = {};
     if (updates.status !== undefined) fields[FEEDBACK_FIELDS.STATUS] = updates.status;
-    if (updates.tag1 !== undefined) fields[FEEDBACK_FIELDS.TAG1] = updates.tag1;
-    if (updates.tag2 !== undefined) fields[FEEDBACK_FIELDS.TAG2] = updates.tag2;
-    if (updates.tag3 !== undefined) fields[FEEDBACK_FIELDS.TAG3] = updates.tag3;
+    // MultiSelect 字段需要字符串数组格式，兼容字符串和数组输入
+    if (updates.tag1 !== undefined) {
+      const tag1Arr = Array.isArray(updates.tag1) ? updates.tag1 : [updates.tag1];
+      fields[FEEDBACK_FIELDS.TAG1] = tag1Arr.filter(t => t);
+    }
+    if (updates.tag2 !== undefined) {
+      const tag2Arr = Array.isArray(updates.tag2) ? updates.tag2 : [updates.tag2];
+      fields[FEEDBACK_FIELDS.TAG2] = tag2Arr.filter(t => t);
+    }
+    if (updates.tag3 !== undefined) {
+      const tag3Arr = Array.isArray(updates.tag3) ? updates.tag3 : [updates.tag3];
+      fields[FEEDBACK_FIELDS.TAG3] = tag3Arr.filter(t => t);
+    }
     if (updates.npsScore !== undefined) fields[FEEDBACK_FIELDS.NPS_SCORE] = updates.npsScore;
 
     if (Object.keys(fields).length === 0) {
@@ -271,18 +279,15 @@ function recordToFeedback(record: { record_id: string; fields: Record<string, un
     tenantName: extractFieldValue(f[FEEDBACK_FIELDS.TENANT_NAME]),
     tenantScale: extractFieldValue(f[FEEDBACK_FIELDS.TENANT_SCALE]),
     userId: extractFieldValue(f[FEEDBACK_FIELDS.USER_ID]),
-    userName: extractFieldValue(f[FEEDBACK_FIELDS.USER_NAME]),
     createTime: String(f[FEEDBACK_FIELDS.CREATE_TIME] || ''),
-    // module 字段暂时使用 UNSATISFACTION_REASON 替代（PRD v2 中无 module）
     module: extractFieldValue(f[FEEDBACK_FIELDS.UNSATISFACTION_REASON]),
     content: extractFieldValue(f[FEEDBACK_FIELDS.CONTENT]),
     npsScore: Number(f[FEEDBACK_FIELDS.NPS_SCORE] || 0),
     source: extractFieldValue(f[FEEDBACK_FIELDS.SOURCE]),
-    tag1: extractFieldValue(f[FEEDBACK_FIELDS.TAG1]),
-    tag2: extractFieldValue(f[FEEDBACK_FIELDS.TAG2]),
-    tag3: extractFieldValue(f[FEEDBACK_FIELDS.TAG3]),
+    tag1: extractMultiSelectFieldValue(f[FEEDBACK_FIELDS.TAG1]).join(', '),
+    tag2: extractMultiSelectFieldValue(f[FEEDBACK_FIELDS.TAG2]).join(', '),
+    tag3: extractMultiSelectFieldValue(f[FEEDBACK_FIELDS.TAG3]).join(', '),
     confidence: Number(f[FEEDBACK_FIELDS.CONFIDENCE] || 0),
-    tagTime: String(f[FEEDBACK_FIELDS.TAG_TIME] || ''),
     status: extractFieldValue(f[FEEDBACK_FIELDS.STATUS]) as Feedback['status'],
     recordId: record.record_id,
   };

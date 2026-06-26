@@ -12,7 +12,7 @@ import {
 } from '@/lib/ai/tagger';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS } from '@/lib/feishu/constants';
-import { PaginatedResponse, Tag, TagStatus } from '@/lib/types';
+import { PaginatedResponse, Tag } from '@/lib/types';
 import { TABLES } from '@/lib/storage/base-storage';
 
 type TagLevel = 'tag1' | 'tag2' | 'tag3';
@@ -98,17 +98,11 @@ export async function POST(request: NextRequest) {
 
     const createFields: Record<string, unknown> = {
       [fields.TAG_ID]: tagId,
-      [fields.NAME]: name,
-      [fields.USAGE_COUNT]: 0,
-      [fields.LARGE_TENANT_COUNT]: 0,
-      [fields.LARGE_TENANT_RATIO]: 0,
+      [fields.TAG_NAME]: name,
     };
 
     if (level === 'tag1') {
-      createFields[(fields as typeof TAG1_FIELDS).DEFINITION] = definition || '';
-      createFields[(fields as typeof TAG1_FIELDS).STATUS] = TagStatus.ACTIVE;
-      createFields[(fields as typeof TAG1_FIELDS).CREATED_BY] = createdBy;
-      createFields[(fields as typeof TAG1_FIELDS).CREATED_AT] = Date.now();
+      createFields[(fields as typeof TAG1_FIELDS).DESC] = definition || '';
     }
 
     const record = await bitableClient.createRecord(table, createFields);
@@ -127,12 +121,11 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { level, recordId, name, definition, status } = body as {
+    const { level, recordId, name, definition } = body as {
       level?: TagLevel;
       recordId?: string;
       name?: string;
       definition?: string;
-      status?: TagStatus;
     };
 
     if (!level || !recordId) {
@@ -150,10 +143,9 @@ export async function PUT(request: NextRequest) {
     const { table, fields } = tableMap[level];
 
     const updateFields: Record<string, unknown> = {};
-    if (name !== undefined) updateFields[fields.NAME] = name;
+    if (name !== undefined) updateFields[fields.TAG_NAME] = name;
     if (level === 'tag1') {
-      if (definition !== undefined) updateFields[(fields as typeof TAG1_FIELDS).DEFINITION] = definition;
-      if (status !== undefined) updateFields[(fields as typeof TAG1_FIELDS).STATUS] = status;
+      if (definition !== undefined) updateFields[(fields as typeof TAG1_FIELDS).DESC] = definition;
     }
 
     const record = await bitableClient.updateRecord(table, recordId, updateFields);

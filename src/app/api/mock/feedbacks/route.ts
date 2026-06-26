@@ -24,9 +24,9 @@ const FEEDBACK_TEMPLATES = [
   // 用户教育
   { tag1: '用户教育', contents: ['不知道怎么申请补卡', '找不到休假申请入口', '不清楚如何设置审批人', '不知道怎么看工资条', '不了解打卡规则', '不会使用外勤打卡功能', '不清楚假期余额怎么算'] },
   // 安全
-  { tag1: '安全', contents: ['打卡位置可以伪造', '审批权限设置不合理', '工资条信息泄露风险', '考勤数据访问权限过大', '用户隐私保护不足', '打卡记录被篡改', '敏感信息未加密'] },
+  { tag1: '安全合规', contents: ['打卡位置可以伪造', '审批权限设置不合理', '工资条信息泄露风险', '考勤数据访问权限过大', '用户隐私保护不足', '打卡记录被篡改', '敏感信息未加密'] },
   // 无效
-  { tag1: '无效', contents: ['test', '测试数据', '111111', '无意义反馈', 'aaaaaaaa', '随便填的', '不知道说什么'] },
+  { tag1: '无效反馈', contents: ['test', '测试数据', '111111', '无意义反馈', 'aaaaaaaa', '随便填的', '不知道说什么'] },
 ];
 
 function generateMockData(count: number = 200) {
@@ -39,12 +39,12 @@ function generateMockData(count: number = 200) {
     const moduleName = MODULES[Math.floor(Math.random() * MODULES.length)];
     const source = SOURCES[Math.floor(Math.random() * SOURCES.length)];
     const tenantName = TENANT_NAMES[Math.floor(Math.random() * TENANT_NAMES.length)];
-    
+
     // 生成随机时间（最近30天内）
     const daysAgo = Math.floor(Math.random() * 30);
     const hoursAgo = Math.floor(Math.random() * 24);
     const createTime = new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000 - hoursAgo * 60 * 60 * 1000);
-    
+
     // 评分分布：1-2分占60%，3分占20%，4-5分占20%
     const scoreRandom = Math.random();
     let score: number;

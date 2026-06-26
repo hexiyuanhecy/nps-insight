@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { bitableClient, extractFieldValue } from '@/lib/feishu/bitable';
+import { bitableClient, extractFieldValue, extractMultiSelectFieldValue } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, TOP_ISSUES_FIELDS } from '@/lib/feishu/constants';
 import { getDefaultDocument, getDefaultNotification } from '@/lib/adapter-factory';
 import { DocumentAdapter } from '@/lib/document/base-document';
@@ -70,9 +70,11 @@ async function generateWeeklyReport(weekOffset: number = 0): Promise<{
     // 统计Top问题
     const tagCounts: Record<string, number> = {};
     weekFeedbacks.forEach((f) => {
-      const tag1 = extractFieldValue(f.fields[FEEDBACK_FIELDS.TAG1]);
-      if (tag1) {
-        tagCounts[tag1] = (tagCounts[tag1] || 0) + 1;
+      const tag1Arr = extractMultiSelectFieldValue(f.fields[FEEDBACK_FIELDS.TAG1]);
+      for (const tag1 of tag1Arr) {
+        if (tag1) {
+          tagCounts[tag1] = (tagCounts[tag1] || 0) + 1;
+        }
       }
     });
 
@@ -170,6 +172,14 @@ function generateWeeklyDocContent(data: {
   content += `---\n\n`;
   content += `*由 NPS Insight 自动生成于 ${new Date().toLocaleString('zh-CN')}*\n`;
 
+  // ========== 日志：打印周报文档内容 ==========
+  console.log('\n' + '='.repeat(60));
+  console.log('【周报文档 - 生成内容预览】');
+  console.log('='.repeat(60));
+  console.log(content);
+  console.log('='.repeat(60) + '\n');
+  // ========================================================
+
   return content;
 }
 
@@ -207,14 +217,12 @@ export async function GET(request: NextRequest) {
 
     const weeklyReports = records
       .filter((r) => {
-        const name = extractFieldValue(r.fields[TOP_ISSUES_FIELDS.TAG2_NAME] || '');
+        const name = extractFieldValue(r.fields[TOP_ISSUES_FIELDS.TAG2] || '');
         return name.includes('周报') || name.includes('周');
       })
       .map((r) => ({
-        periodId: extractFieldValue(r.fields[TOP_ISSUES_FIELDS.ISSUE_KEY] || ''),
-        periodName: extractFieldValue(r.fields[TOP_ISSUES_FIELDS.TAG2_NAME] || ''),
+        periodName: extractFieldValue(r.fields[TOP_ISSUES_FIELDS.TAG2] || ''),
         totalFeedbacks: Number(r.fields[TOP_ISSUES_FIELDS.TOTAL_COUNT] || 0),
-        npsScore: Number(r.fields[TOP_ISSUES_FIELDS.AVG_SCORE] || 0),
         recordId: r.record_id,
       }));
 
@@ -240,18 +248,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: result.error }, { status: 500 });
     }
 
-    // 保存到分析表
-    try {
-      await bitableClient.createRecord(TABLE_NAMES.TOP_ISSUES, {
-        [TOP_ISSUES_FIELDS.TAG2_NAME]: `第${result.weekNumber}周周报`,
-        [TOP_ISSUES_FIELDS.TAG3_NAMES]: ['周报'],
-        [TOP_ISSUES_FIELDS.TOTAL_COUNT]: result.totalFeedbacks,
-        [TOP_ISSUES_FIELDS.PERIOD_NEW_COUNT]: result.totalFeedbacks,
-        [TOP_ISSUES_FIELDS.AVG_SCORE]: result.npsScore,
-      });
-    } catch (saveError) {
-      console.error('[API] 保存周报记录失败', saveError);
-    }
+    // 注意：Top问题表的统计字段（总反馈数等）由飞书自动计算，不再手动写入
+    // 周报/月报数据主要通过文档和通知推送，无需存入Top问题表
+    console.log('[API] 周报生成完成，跳过Top问题表写入（统计字段由飞书自动计算）');
 
     // 发送通知
     const chatId = process.env.NOTIFICATION_CHAT_ID;

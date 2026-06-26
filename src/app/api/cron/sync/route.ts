@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AdapterFactory } from '@/lib/data-sources/adapter-factory';
 import { LLMProviderFactory } from '@/lib/llm/provider-factory';
-import { bitableClient } from '@/lib/feishu/bitable';
+import { bitableClient, initializeBitableConfig } from '@/lib/feishu/bitable';
 import { extractMultiSelectFieldValue } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, TENANT_FIELDS } from '@/lib/feishu/constants';
 import { feishuBot, createWeeklyReportCard } from '@/lib/feishu/bot';
@@ -115,14 +115,18 @@ async function runSyncTask(): Promise<SyncResult> {
   let syncedCount = 0;
   let failedCount = 0;
 
-  // 多用户支持：尝试从 KV 获取所有配置
+  // 多用户支持：尝试从 KV 获取所有配置（带超时保护）
   try {
-    const configKeys = await listAllConfigKeys();
+    const kvPromise = listAllConfigKeys();
+    const timeoutPromise = new Promise<string[]>((resolve) => {
+      setTimeout(() => resolve([]), 3000);
+    });
+    const configKeys = await Promise.race([kvPromise, timeoutPromise]);
 
     if (configKeys.length > 0) {
       console.log(`[Cron] 发现 ${configKeys.length} 个用户配置，开始多用户同步`);
 
-      // 遍历每个用户的配置执行同步
+      // 遍历每个用户的配置执行同步（只做数据同步+打标，不发通知）
       for (const key of configKeys) {
         const ownerId = key.replace('config:', '');
         console.log(`[Cron] 正在同步用户: ${ownerId}`);
@@ -130,7 +134,6 @@ async function runSyncTask(): Promise<SyncResult> {
         try {
           const userConfig = await getConfig(ownerId);
           if (userConfig) {
-            // 为每个用户执行同步（当前实现仍使用全局环境变量，未来需改进）
             const result = await runSyncTaskForUser(ownerId);
             syncedCount += result.syncedCount;
             failedCount += result.failedCount;
@@ -139,6 +142,22 @@ async function runSyncTask(): Promise<SyncResult> {
         } catch (userErr) {
           console.error(`[Cron] 用户 ${ownerId} 同步失败:`, userErr);
           details.push(`[${ownerId}] 同步失败: ${userErr instanceof Error ? userErr.message : '未知错误'}`);
+        }
+      }
+
+      // 所有用户同步完成后，统一发送一次通知
+      console.log(`[Cron] 所有用户同步完成，统一发送通知，本次新增 ${syncedCount} 条`);
+      const notificationResult = await sendNotification(syncedCount);
+      if (notificationResult) {
+        details.push('发送通知成功');
+        // 生成周报文档
+        try {
+          const docResult = await generateWeeklyDoc();
+          if (docResult) {
+            details.push('生成周报文档成功');
+          }
+        } catch (docErr) {
+          console.error('[Cron] 周报文档生成失败', docErr);
         }
       }
 
@@ -168,47 +187,52 @@ async function runSyncTaskSingleUser(): Promise<SyncResult> {
   let failedCount = 0;
 
   try {
+    // 初始化飞书配置（从 KV 加载）
+    await initializeBitableConfig();
+
     // DEV_MODE: 开发阶段使用 Mock 数据
     if (process.env.CRON_DEV_MODE === 'true') {
       console.log('[Cron DEV] 开发模式：使用 Mock 数据');
       const mockResult = await runSyncWithMockData();
       console.log(`[Cron DEV] Mock 结果: synced=${mockResult.syncedCount}, failed=${mockResult.failedCount}`);
-      return mockResult;
+      syncedCount = mockResult.syncedCount;
+      failedCount = mockResult.failedCount;
+      details.push(...mockResult.details);
+    } else {
+      // 非 DEV_MODE 下增加超时保护（60s）
+      const withTimeout = <T>(promise: Promise<T>, ms: number, name: string): Promise<T> => {
+        return Promise.race([
+          promise,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`[${name}] 操作超时 (${ms}ms)`)), ms)
+          ),
+        ]);
+      };
+
+      // 步骤1：拉取外部数据（多数据源适配器）
+      const externalDataResult = await withTimeout(syncExternalData(), 30000, 'syncExternalData');
+      if (externalDataResult > 0) {
+        details.push(`从外部数据源同步了 ${externalDataResult} 条反馈`);
+        syncedCount += externalDataResult;
+      }
+
+      // 步骤2：对未打标的反馈进行AI批量打标
+      const tagResult = await withTimeout(autoTagFeedbacks(50), 30000, 'autoTagFeedbacks');
+      if (tagResult > 0) {
+        details.push(`AI自动打标 ${tagResult} 条反馈`);
+        syncedCount += tagResult;
+      }
+
+      // 步骤3：生成周期报告
+      const reportResult = await withTimeout(generateDailyReport(), 15000, 'generateDailyReport');
+      if (reportResult) {
+        details.push('生成每日报告成功');
+      }
     }
 
-    // 非 DEV_MODE 下增加超时保护（60s）
-    const withTimeout = <T>(promise: Promise<T>, ms: number, name: string): Promise<T> => {
-      return Promise.race([
-        promise,
-        new Promise<T>((_, reject) =>
-          setTimeout(() => reject(new Error(`[${name}] 操作超时 (${ms}ms)`)), ms)
-        ),
-      ]);
-    };
-
-    // 步骤1：拉取外部数据（多数据源适配器）
-    const externalDataResult = await withTimeout(syncExternalData(), 30000, 'syncExternalData');
-    if (externalDataResult > 0) {
-      details.push(`从外部数据源同步了 ${externalDataResult} 条反馈`);
-      syncedCount += externalDataResult;
-    }
-
-    // 步骤2：对未打标的反馈进行AI批量打标
-    const tagResult = await withTimeout(autoTagFeedbacks(50), 30000, 'autoTagFeedbacks');
-    console.log('==============================>hxytagResult == ', tagResult)
-    if (tagResult > 0) {
-      details.push(`AI自动打标 ${tagResult} 条反馈`);
-      syncedCount += tagResult;
-    }
-
-    // 步骤3：生成周期报告
-    const reportResult = await withTimeout(generateDailyReport(), 15000, 'generateDailyReport');
-    if (reportResult) {
-      details.push('生成每日报告成功');
-    }
-
-    // 步骤4：发送通知
-    const notificationResult = await withTimeout(sendNotification(syncedCount), 30000, 'sendNotification');
+    // 步骤4：发送通知（只发一次，所有打标完成后）
+    console.log(`[Cron] 所有打标完成，开始发送通知，本次新增 ${syncedCount} 条`);
+    const notificationResult = await sendNotification(syncedCount);
     if (notificationResult) {
       details.push('发送通知成功');
     }
@@ -216,7 +240,7 @@ async function runSyncTaskSingleUser(): Promise<SyncResult> {
     // 步骤5：生成周报文档
     if (notificationResult) {
       try {
-        const docResult = await withTimeout(generateWeeklyDoc(), 30000, 'generateWeeklyDoc');
+        const docResult = await generateWeeklyDoc();
         if (docResult) {
           details.push('生成周报文档成功');
         } else {
@@ -264,6 +288,9 @@ async function runSyncTaskForUser(ownerId: string): Promise<SyncResult> {
   let failedCount = 0;
 
   try {
+    // 初始化飞书配置（从 KV 加载）
+    await initializeBitableConfig();
+
     if (process.env.CRON_DEV_MODE === 'true') {
       const mockResult = await runSyncWithMockData();
       return { ...mockResult, details };
@@ -277,16 +304,12 @@ async function runSyncTaskForUser(ownerId: string): Promise<SyncResult> {
       syncedCount += externalDataResult;
     }
 
-    const tagResult = await autoTagFeedbacks(50);
+    const tagResult = await autoTagFeedbacks(50, ownerId);
     if (tagResult > 0) {
       syncedCount += tagResult;
     }
-console.log('==============================>hxy2 == ', 2)
+
     await generateDailyReport();
-    const notifOk = await sendNotification(syncedCount);
-    if (notifOk) {
-      await generateWeeklyDoc();
-    }
 
     return {
       success: true,
@@ -367,7 +390,7 @@ async function syncExternalData(): Promise<number> {
     // 步骤2.5：租户信息查询 — 补充新租户名称
     const tenantNameMap = await enrichTenantInfo(filteredFeedbacks);
 
-    // 步骤3：批量写入
+    // 步骤3：批量写入（注意：租户名称是自动计算字段，不写入）
     const records = filteredFeedbacks.map((f) => ({
       fields: {
         [FEEDBACK_FIELDS.FEEDBACK_ID]: f.feedbackId,
@@ -377,10 +400,9 @@ async function syncExternalData(): Promise<number> {
         [FEEDBACK_FIELDS.UNSATISFACTION_REASON]: f.module || '',
         [FEEDBACK_FIELDS.SOURCE]: f.source || '',
         [FEEDBACK_FIELDS.TENANT_ID]: f.tenantId || '',
-        [FEEDBACK_FIELDS.TENANT_NAME]: tenantNameMap.get(f.tenantId ?? '') || f.tenantName || '',
         [FEEDBACK_FIELDS.TENANT_SCALE]: f.tenantScale || '',
         [FEEDBACK_FIELDS.USER_ID]: f.larkUserId || '',
-        [FEEDBACK_FIELDS.STATUS]: 'new',
+        [FEEDBACK_FIELDS.STATUS]: '未打标',
       },
     }));
 
@@ -396,10 +418,15 @@ async function syncExternalData(): Promise<number> {
 
 /**
  * 自动对未打标的反馈进行AI打标（批量打包，使用 tagger 统一逻辑）
+ * @param batchSize 每批处理条数
+ * @param ownerId 用户配置 ID（用于读取置信度阈值）
  * @returns 打标的反馈条数
  */
-async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
+async function autoTagFeedbacks(batchSize: number = 50, ownerId?: string): Promise<number> {
   try {
+    // 从 KV 配置读取置信度阈值
+    const confidenceThreshold = await getConfidenceThreshold(ownerId);
+
     // 获取所有记录（listRecords 已自动处理分页）
     const allRecords = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
       pageSize: 500,
@@ -448,30 +475,84 @@ async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
         unsatReason: String(record.fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] || ''),
       }));
 
-      // 使用 tagger 统一打标逻辑
-      const results = await tagger.batchAnalyzeFeedbacks(feedbacks, existingTags);
+      // 使用 tagger 统一打标逻辑（传入动态置信度阈值）
+      const results = await tagger.batchAnalyzeFeedbacks(feedbacks, existingTags, confidenceThreshold);
 
       const elapsed = Date.now() - t0;
       const batchSuccess = results.filter(r => r.success).length;
       console.log(`[Cron] 批次 ${batchNum} AI分析完成 (${elapsed}ms, 成功 ${batchSuccess}/${results.length})`);
 
-      // 批量更新飞书
-      // MultiSelect 字段需要传入字符串数组，过滤空字符串，确保格式正确
+      // 第一步：收集本批次所有标签名
+      const allTag1Names = new Set<string>();
+      const allTag2Names = new Set<string>();
+      const allTag3Names = new Set<string>();
+
+      for (const result of results) {
+        if (!result.success || !result.result) continue;
+        result.result.tag1.forEach(t => t && allTag1Names.add(t));
+        result.result.tag2.forEach(t => t && allTag2Names.add(t));
+        result.result.tag3.forEach(t => t && allTag3Names.add(t));
+      }
+
+      // ========== 日志：打印本批次所有标签 ==========
+      console.log(`[Cron] 批次 ${batchNum} 标签汇总: Tag1=${allTag1Names.size}, Tag2=${allTag2Names.size}, Tag3=${allTag3Names.size}`);
+      console.log(`  Tag1: ${Array.from(allTag1Names).join(', ')}`);
+      console.log(`  Tag2: ${Array.from(allTag2Names).join(', ')}`);
+      console.log(`  Tag3: ${Array.from(allTag3Names).join(', ')}`);
+      // ========================================================
+
+      // 第二步：确保反馈表多选字段的选项存在（动态添加新选项）
+      console.log(`[Cron] 批次 ${batchNum} 确保多选字段选项存在...`);
+      try {
+        await bitableClient.addMultiSelectOptions(TABLE_NAMES.FEEDBACK, FEEDBACK_FIELDS.TAG1, Array.from(allTag1Names));
+        await bitableClient.addMultiSelectOptions(TABLE_NAMES.FEEDBACK, FEEDBACK_FIELDS.TAG2, Array.from(allTag2Names));
+        await bitableClient.addMultiSelectOptions(TABLE_NAMES.FEEDBACK, FEEDBACK_FIELDS.TAG3, Array.from(allTag3Names));
+      } catch (optErr) {
+        console.error(`[Cron] 批次 ${batchNum} 添加多选选项失败:`, optErr);
+      }
+
+      // 第三步：同时确保标签表中的记录存在（用于统计和关联）
+      console.log(`[Cron] 批次 ${batchNum} 确保标签表记录存在: Tag1=${allTag1Names.size}, Tag2=${allTag2Names.size}, Tag3=${allTag3Names.size}`);
+      for (const name of Array.from(allTag1Names)) {
+        try {
+          await tagger.ensureTagExists(name, 'tag1');
+        } catch (e) {
+          console.error(`[Cron] 确保Tag1存在失败 ${name}:`, e);
+        }
+      }
+      for (const name of Array.from(allTag2Names)) {
+        try {
+          await tagger.ensureTagExists(name, 'tag2');
+        } catch (e) {
+          console.error(`[Cron] 确保Tag2存在失败 ${name}:`, e);
+        }
+      }
+      for (const name of Array.from(allTag3Names)) {
+        try {
+          await tagger.ensureTagExists(name, 'tag3');
+        } catch (e) {
+          console.error(`[Cron] 确保Tag3存在失败 ${name}:`, e);
+        }
+      }
+
+      // 第四步：写入标签名称到反馈表（tag1/tag2/tag3 是 MultiSelect 多选字段）
       const updates = results
         .filter(r => r.success && r.result)
-        .map(r => ({
-          record_id: r.recordId,
-          fields: {
-            [FEEDBACK_FIELDS.TAG1]: (r.result!.tag1 || []).filter(t => t),
-            [FEEDBACK_FIELDS.TAG2]: (r.result!.tag2 || []).filter(t => t),
-            [FEEDBACK_FIELDS.TAG3]: (r.result!.tag3 || []).filter(t => t),
-            [FEEDBACK_FIELDS.CONFIDENCE]: r.result!.confidence,
-            [FEEDBACK_FIELDS.NEED_LOG_CHECK]: r.result!.needLogCheck ? '是' : '否',
-            [FEEDBACK_FIELDS.REVIEW_NEEDED]: r.result!.reviewNeeded ? '是' : '否',
-            [FEEDBACK_FIELDS.TRANSLATED_CONTENT]: r.result!.translatedContent || '',
-            [FEEDBACK_FIELDS.STATUS]: '已打标',
-          },
-        }));
+        .map(r => {
+          return {
+            record_id: r.recordId,
+            fields: {
+              [FEEDBACK_FIELDS.TAG1]: r.result!.tag1 || [],
+              [FEEDBACK_FIELDS.TAG2]: r.result!.tag2 || [],
+              [FEEDBACK_FIELDS.TAG3]: r.result!.tag3 || [],
+              [FEEDBACK_FIELDS.CONFIDENCE]: r.result!.confidence,
+              [FEEDBACK_FIELDS.NEED_LOG_CHECK]: r.result!.needLogCheck,
+              [FEEDBACK_FIELDS.REVIEW_NEEDED]: r.result!.reviewNeeded,
+              [FEEDBACK_FIELDS.TRANSLATED_CONTENT]: r.result!.translatedContent || '',
+              [FEEDBACK_FIELDS.STATUS]: '已打标',
+            },
+          };
+        });
 
       if (updates.length > 0) {
         try {
@@ -490,42 +571,8 @@ async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
         }
       }
 
-      // 同步创建/更新标签和统计数据
-      for (let j = 0; j < results.length; j++) {
-        const result = results[j];
-        if (!result.success || !result.result) continue;
-
-        const record = batch[j];
-        const tenantScale = String(record.fields[FEEDBACK_FIELDS.TENANT_SCALE] || '');
-        const npsScore = Number(record.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0);
-
-        for (const tag1 of result.result.tag1) {
-          try {
-            await tagger.ensureTagExists(tag1, 'tag1');
-            await tagger.updateTagStatistics(tag1, 'tag1', tenantScale, npsScore);
-          } catch (tagErr) {
-            console.error(`[Cron] 更新Tag1失败 ${tag1}:`, tagErr);
-          }
-        }
-
-        for (const tag2 of result.result.tag2) {
-          try {
-            await tagger.ensureTagExists(tag2, 'tag2');
-            await tagger.updateTagStatistics(tag2, 'tag2', tenantScale, npsScore);
-          } catch (tagErr) {
-            console.error(`[Cron] 更新Tag2失败 ${tag2}:`, tagErr);
-          }
-        }
-
-        for (const tag3 of result.result.tag3) {
-          try {
-            await tagger.ensureTagExists(tag3, 'tag3');
-            await tagger.updateTagStatistics(tag3, 'tag3', tenantScale, npsScore);
-          } catch (tagErr) {
-            console.error(`[Cron] 更新Tag3失败 ${tag3}:`, tagErr);
-          }
-        }
-      }
+      // 第三步：标签统计数据由飞书公式字段自动计算，无需手动更新
+      // （总使用次数、大租户使用次数等通过关联字段公式自动统计）
 
       failCount += results.filter(r => !r.success).length;
     }
@@ -540,6 +587,7 @@ async function autoTagFeedbacks(batchSize: number = 50): Promise<number> {
 
 /**
  * 生成每日报告
+ * 注意：Top问题表的统计字段（总反馈数等）由飞书自动计算，不再手动写入
  * @returns 是否成功
  */
 async function generateDailyReport(): Promise<boolean> {
@@ -547,8 +595,6 @@ async function generateDailyReport(): Promise<boolean> {
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
-
-    const dateStr = yesterday.toISOString().split('T')[0];
 
     // 获取昨日反馈
     const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
@@ -565,7 +611,7 @@ async function generateDailyReport(): Promise<boolean> {
       return true;
     }
 
-    // 统计数据
+    // 统计数据（仅用于日志输出，不写入多维表格）
     const total = yesterdayFeedbacks.length;
     const avgScore =
       total > 0
@@ -573,16 +619,7 @@ async function generateDailyReport(): Promise<boolean> {
         : 0;
 
     console.log(`[Cron] 昨日反馈统计: 总计${total}, 均分=${avgScore.toFixed(2)}`);
-
-    // 保存到分析表
-    const { TABLE_NAMES: TOP_ISSUES_TABLE, TOP_ISSUES_FIELDS: AF } = await import('@/lib/feishu/constants');
-    await bitableClient.createRecord(TOP_ISSUES_TABLE.TOP_ISSUES, {
-      [AF.TAG2_NAME]: '周期分析',
-      [AF.TAG3_NAMES]: '自动生成',
-      [AF.TOTAL_COUNT]: total,
-      [AF.PERIOD_NEW_COUNT]: Math.round(avgScore * 100) / 100,
-      [AF.ISSUE_KEY]: JSON.stringify(['查看多维表格获取详细分析']),
-    });
+    console.log('[Cron] 每日报告统计数据仅用于日志，Top问题表统计字段由飞书自动计算');
 
     return true;
   } catch (error) {
@@ -610,6 +647,24 @@ async function sendNotification(syncedCount: number): Promise<boolean> {
     weekStart.setHours(0, 0, 0, 0)
     const weekEnd = new Date(weekStart)
     weekEnd.setDate(weekStart.getDate() + 7)
+
+    // 预加载标签缓存（用于 record_id -> 名称 转换）
+    const allTags = await tagger.getCachedTags();
+    const tag3RecordIdToName = new Map<string, string>();
+    const tag2RecordIdToName = new Map<string, string>();
+    const tag1RecordIdToName = new Map<string, string>();
+    for (const tag of allTags) {
+      if (tag.table === 'tag3' && tag.recordId && tag.tag3Name) {
+        tag3RecordIdToName.set(tag.recordId, tag.tag3Name);
+      }
+      if (tag.table === 'tag2' && tag.recordId && tag.tag2Name) {
+        tag2RecordIdToName.set(tag.recordId, tag.tag2Name);
+      }
+      if (tag.table === 'tag1' && tag.recordId && tag.tag1Name) {
+        tag1RecordIdToName.set(tag.recordId, tag.tag1Name);
+      }
+    }
+    console.log(`[Cron] 标签映射: Tag1=${tag1RecordIdToName.size}, Tag2=${tag2RecordIdToName.size}, Tag3=${tag3RecordIdToName.size}`);
 
     const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
       pageSize: 500
@@ -645,12 +700,12 @@ async function sendNotification(syncedCount: number): Promise<boolean> {
       if (reviewNeeded) reviewCount++
       if (needLog) needLogCheckCount++
 
-      // 统计Tag3频次（MultiSelect 字段，可能有多个值）
-      const tag3Arr = extractMultiSelectFieldValue(fields[FEEDBACK_FIELDS.TAG3])
-      for (const tag3 of tag3Arr) {
-        if (tag3) {
-          tag3Counts.set(tag3, (tag3Counts.get(tag3) || 0) + 1)
-        }
+      // 统计Tag3频次（关联字段存的是 record_id，需要转成标签名）
+      const tag3RecordIds = extractMultiSelectFieldValue(fields[FEEDBACK_FIELDS.TAG3])
+      for (const recordId of tag3RecordIds) {
+        if (!recordId) continue;
+        const tag3Name = tag3RecordIdToName.get(recordId) || recordId;
+        tag3Counts.set(tag3Name, (tag3Counts.get(tag3Name) || 0) + 1)
       }
 
       // 统计评分
@@ -667,10 +722,10 @@ async function sendNotification(syncedCount: number): Promise<boolean> {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
 
-    const topIssues = sortedTag3.map(([tag3, count]) => ({
+    const topIssues = sortedTag3.map(([tag3Name, count]) => ({
       tag1: '',
       tag2: '',
-      tag3,
+      tag3: tag3Name,
       count,
       pct: scoreCount > 0 ? Math.round((count / scoreCount) * 100) : 0
     }))
@@ -690,6 +745,39 @@ async function sendNotification(syncedCount: number): Promise<boolean> {
     const avgScore = scoreCount > 0 ? (totalScore / scoreCount).toFixed(1) : '0'
 
     const weekNum = `第${getISOWeek(today)}周`
+
+    // ========== 日志：打印生成的消息卡片内容 ==========
+    console.log('\n' + '='.repeat(60));
+    console.log('【Bot 通知 - 周报消息内容】');
+    console.log('='.repeat(60));
+    console.log(`📅 周报周期: ${today.getFullYear()}年第${getISOWeek(today)}周`);
+    console.log(`📊 本周反馈总数: ${scoreCount} 条`);
+    console.log(`🆕 新增反馈数: ${syncedCount} 条`);
+    console.log(`⭐ 本周平均分: ${avgScore} 分`);
+    console.log(`🔍 待审核: ${reviewCount} 条`);
+    console.log(`📝 需查日志: ${needLogCheckCount} 条`);
+    console.log('\n--- Top 5 问题 ---');
+    topIssues.forEach((t, i) => {
+      console.log(`  ${i + 1}. ${t.tag3} (${t.tag2}) - ${t.count}次 (${t.pct}%)`);
+    });
+    console.log('\n--- 评分分布 ---');
+    scoreDistribution.forEach(s => {
+      console.log(`  ${s.score}分: ${s.pct}%`);
+    });
+    console.log('\n--- 消息卡片文本预览 ---');
+    const cardText = `📊 【Feelgood 打标周报】${today.getFullYear()}年第${getISOWeek(today)}周
+本周累计：${scoreCount}条反馈（新增${syncedCount}条）
+本周平均分：${avgScore}分
+AI已完成打标，待审核：${reviewCount}条
+
+📋 Top 5 问题
+${topIssues.slice(0, 5).map((t, i) => `${i + 1}. ${t.tag3} (${t.tag2}) - ${t.count}次 (${t.pct}%)`).join('\n')}
+
+📈 评分分布
+${scoreDistribution.map(s => `${s.score}分占${s.pct}%`).join(' | ')}`;
+    console.log(cardText);
+    console.log('='.repeat(60) + '\n');
+    // ========================================================
 
     await feishuBot.sendCardMessage(
       chatId,
@@ -789,7 +877,6 @@ async function enrichTenantInfo(
         await bitableClient.createRecord(TABLE_NAMES.TENANTS, {
           [TENANT_FIELDS.TENANT_ID]: id,
           [TENANT_FIELDS.TENANT_NAME]: '',
-          [TENANT_FIELDS.CREATED_AT]: Date.now(),
         });
       } catch (err) {
         console.error(`[Cron] 写入新租户 ${id} 失败:`, err);
@@ -824,7 +911,6 @@ async function enrichTenantInfo(
       await bitableClient.createRecord(TABLE_NAMES.TENANTS, {
         [TENANT_FIELDS.TENANT_ID]: id,
         [TENANT_FIELDS.TENANT_NAME]: name,
-        [TENANT_FIELDS.CREATED_AT]: Date.now(),
       });
       console.log(`[Cron] 新增租户: ${id} -> ${name || '(名称未知)'}`);
     } catch (err) {
@@ -918,33 +1004,184 @@ async function updateLastSyncTime(): Promise<void> {
 }
 
 // ============================================
-// DEV_MODE: Mock 同步任务
+// DEV_MODE: Mock 同步任务（带详细日志）
 // ============================================
 
+// ====================== Mock常量 ======================
+// 平台-专属反馈文案映射（保证内容和平台匹配）
+const PLATFORM_CONTENT_MAP: Record<string, string[]> = {
+  '打卡小程序': [
+    '打卡定位失败，一直显示定位中', '点击打卡按钮没反应', '外勤打卡提交后页面报错',
+    '希望支持批量打卡', '建议增加一键补卡功能', '希望支持多地点打卡', '建议增加打卡提醒功能',
+    '打卡页面按钮太小，容易误触', '移动端页面适配有问题',
+    '打卡页面加载太慢，要等5秒', '多人同时打卡时系统卡死',
+    '不知道怎么申请补卡', '不了解打卡规则', '不会使用外勤打卡功能',
+    '打卡位置可以伪造', '打卡记录被篡改',
+    'test', '测试数据', '随便填的'
+  ],
+  '休假小程序': [
+    '假期余额计算错误', '休假申请提交后页面报错', '审批流程卡住，无法继续',
+    '希望能自定义审批模板', '希望能设置弹性工作时间',
+    '休假申请流程太长，步骤太多', '深色模式下文字看不清',
+    '假期余额查询响应慢',
+    '找不到休假申请入口', '不清楚假期余额怎么算',
+    '审批权限设置不合理',
+    '111111', '无意义反馈'
+  ],
+  '休假员工端': [
+    '假期余额刷新不出来', '调休申请提交失败',
+    '希望能一键复制上次休假审批', '增加假期到期提醒',
+    '休假时长选择控件不好用',
+    '打开休假列表卡顿',
+    '分不清事假和年假申请入口',
+    'aaaaaaaa', '不知道说什么'
+  ],
+  '假勤管理后台': [
+    '考勤数据丢失，昨天打卡记录不见了', '工资条显示乱码',
+    '建议增加导出考勤报表功能',
+    '审批页面排版太乱', '统计页面图表不清晰', '工资条页面颜色不统一',
+    '打开统计页面卡顿严重', '审批列表滑动卡顿', '工资条页面打开速度慢',
+    '不清楚如何设置审批人', '不知道怎么看工资条',
+    '工资条信息泄露风险', '考勤数据访问权限过大', '敏感信息未加密'
+  ],
+  '考勤机': [
+    '人脸打卡识别失败', '考勤机同步数据中断', '机器打卡记录不同步后台',
+    '希望支持刷卡+人脸双打卡', '增加机器离线打卡缓存功能',
+    '考勤机屏幕字体太小老人看不清',
+    '考勤机开机加载缓慢', '多人排队打卡识别卡顿',
+    '他人代刷人脸可通过验证'
+  ]
+};
+const PLATFORM_LIST = Object.keys(PLATFORM_CONTENT_MAP);
+const TENANT_SCALE_LIST = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'];
+const DISSATISFY_REASON_LIST = ['系统卡顿', '界面不美观', '功能缺失', '打开速度慢', '其他', '缺少功能'];
+
+// 租户全局缓存：同一租户ID，名称、规模全局统一
+const tenantGlobalCache = new Map<string, { tenantName: string; scale: string }>();
+
+// ====================== Mock工具函数 ======================
+// 随机数组取N个不重复元素
+function randomPickArr<T>(arr: T[], min = 1, max = arr.length): T[] {
+  const count = Math.floor(Math.random() * (max - min + 1)) + min;
+  const copy = [...arr];
+  const res: T[] = [];
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(Math.random() * copy.length);
+    res.push(copy.splice(idx, 1)[0]);
+  }
+  return res;
+}
+
+// 随机小数保留1位
+function randomFloat(min: number, max: number): number {
+  return Number((Math.random() * (max - min) + min).toFixed(1));
+}
+
+// ====================== Mock数据生成 ======================
+// 获取/创建租户基础信息（存入全局缓存，给租户Mock复用）
+function getOrCreateTenantBase(tenantId: string): { tenantName: string; scale: string } {
+  if (tenantGlobalCache.has(tenantId)) {
+    return tenantGlobalCache.get(tenantId)!;
+  }
+  const namePool = ['租户1', '租户3', '租户7', '租户8', '租户9', '租户10'];
+  const tenantName = namePool[Math.floor(Math.random() * namePool.length)];
+  const scale = TENANT_SCALE_LIST[Math.floor(Math.random() * TENANT_SCALE_LIST.length)];
+  const baseInfo = { tenantName, scale };
+  tenantGlobalCache.set(tenantId, baseInfo);
+  return baseInfo;
+}
+
+// 生成单条反馈（字段名与反馈表完全对应）
+function genSingleFeedback(): {
+  反馈ID: string;
+  租户ID: string;
+  租户名称: string;
+  租户规模: string;
+  用户ID: string;
+  创建时间: string;
+  不满意原因: string;
+  反馈原文: string;
+  反馈平台: string;
+  评分: number;
+} {
+  const feedbackId = `MOCK_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const tenantId = `T${String(Math.floor(Math.random() * 999)).padStart(3, '0')}`;
+  const { tenantName, scale } = getOrCreateTenantBase(tenantId);
+  const userId = `U${String(Math.floor(Math.random() * 9999)).padStart(4, '0')}`;
+  const month = String(Math.floor(Math.random() * 6) + 1).padStart(2, '0');
+  const day = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
+  const createTime = `2026/${month}/${day}`;
+  const reasonArr = randomPickArr(DISSATISFY_REASON_LIST, 1, 3);
+  const dissatisfyReason = reasonArr.join(',');
+  const platform = PLATFORM_LIST[Math.floor(Math.random() * PLATFORM_LIST.length)];
+  const contentPool = PLATFORM_CONTENT_MAP[platform];
+  const feedbackText = contentPool[Math.floor(Math.random() * contentPool.length)];
+  const score = randomFloat(1, 5);
+
+  return {
+    反馈ID: feedbackId,
+    租户ID: tenantId,
+    租户名称: tenantName,
+    租户规模: scale,
+    用户ID: userId,
+    创建时间: createTime,
+    不满意原因: dissatisfyReason,
+    反馈原文: feedbackText,
+    反馈平台: platform,
+    评分: score
+  };
+}
+
+// 批量生成反馈，返回【反馈列表 + 去重租户ID数组】
+function batchGenFeedback(count = 10): {
+  feedbackList: ReturnType<typeof genSingleFeedback>[];
+  uniqueTenantIds: string[];
+} {
+  const feedbackList: ReturnType<typeof genSingleFeedback>[] = [];
+  for (let i = 0; i < count; i++) {
+    feedbackList.push(genSingleFeedback());
+  }
+  // 提取所有唯一租户ID
+  const tenantIdSet = new Set(feedbackList.map(item => item.租户ID));
+  const uniqueTenantIds = Array.from(tenantIdSet);
+  return { feedbackList, uniqueTenantIds };
+}
+
+/**
+ * Mock 同步任务：生成模拟反馈数据 → 写入多维表格 → AI打标 → 发送通知
+ * 带详细日志输出，方便调试阅读
+ */
 async function runSyncWithMockData(): Promise<SyncResult> {
   const details: string[] = [];
   let syncedCount = 0;
   let failedCount = 0;
 
   try {
-    // Mock: 生成 50 条模拟反馈
-    const mockFeedbacks = generateMockFeedbacks(50);
-    console.log(`[Cron DEV] 生成了 ${mockFeedbacks.length} 条 Mock 反馈`);
+    // =============== 步骤1：生成 Mock 反馈数据 ===============
+    console.log('\n========== [步骤1] 生成 Mock 反馈数据 ==========');
+    const MOCK_COUNT = 100; // 生成100条
+    const { feedbackList, uniqueTenantIds } = batchGenFeedback(MOCK_COUNT);
+    console.log(`[Mock] 生成 ${feedbackList.length} 条反馈，涉及 ${uniqueTenantIds.length} 个租户`);
+    console.log('[Mock] 前3条反馈预览:');
+    feedbackList.slice(0, 3).forEach((fb, i) => {
+      console.log(`  ${i + 1}. [${fb.反馈平台}] ${fb.反馈原文.substring(0, 30)}... | 评分:${fb.评分} | 租户:${fb.租户名称}(${fb.租户规模})`);
+    });
 
-    // Mock: 写入多维表格（状态设为"未打标"，以便后续 AI 打标）
+    // =============== 步骤2：写入多维表格 ===============
+    console.log('\n========== [步骤2] 写入多维表格 ==========');
     const ts = Date.now();
-    const records = mockFeedbacks.map((fb, i) => ({
+    // 构建符合反馈表字段格式的记录
+    const records = feedbackList.map((fb, i) => ({
       fields: {
         [FEEDBACK_FIELDS.FEEDBACK_ID]: `MOCK_${ts}_${i + 1}`,
-        [FEEDBACK_FIELDS.CONTENT]: fb.content,
-        [FEEDBACK_FIELDS.NPS_SCORE]: fb.score,
-        [FEEDBACK_FIELDS.CREATE_TIME]: new Date(fb.created_at).getTime(),
-        [FEEDBACK_FIELDS.SOURCE]: 'Mock',
-        [FEEDBACK_FIELDS.TENANT_ID]: fb.tenantId,
-        [FEEDBACK_FIELDS.TENANT_NAME]: fb.tenantName,
-        [FEEDBACK_FIELDS.TENANT_SCALE]: fb.tenantScale,
-        [FEEDBACK_FIELDS.USER_ID]: fb.userId,
-        [FEEDBACK_FIELDS.USER_NAME]: 'Mock用户',
+        [FEEDBACK_FIELDS.TENANT_ID]: fb.租户ID,
+        [FEEDBACK_FIELDS.TENANT_SCALE]: fb.租户规模,
+        [FEEDBACK_FIELDS.USER_ID]: fb.用户ID,
+        [FEEDBACK_FIELDS.CREATE_TIME]: new Date(fb.创建时间).getTime(),
+        [FEEDBACK_FIELDS.UNSATISFACTION_REASON]: fb.不满意原因.split(','),
+        [FEEDBACK_FIELDS.CONTENT]: fb.反馈原文,
+        [FEEDBACK_FIELDS.NPS_SCORE]: fb.评分,
+        [FEEDBACK_FIELDS.SOURCE]: fb.反馈平台,
         [FEEDBACK_FIELDS.STATUS]: '未打标',
       },
     }));
@@ -952,10 +1189,10 @@ async function runSyncWithMockData(): Promise<SyncResult> {
     try {
       await bitableClient.batchCreateRecords(TABLE_NAMES.FEEDBACK, records);
       syncedCount = records.length;
-      console.log(`[Cron DEV] 批量写入 ${syncedCount} 条 Mock 反馈`);
+      console.log(`[Mock] 批量写入成功: ${syncedCount} 条反馈`);
       details.push(`[Mock] 写入 ${syncedCount} 条反馈到飞书表格`);
     } catch (err) {
-      console.error('[Cron DEV] 批量写入失败:', err);
+      console.error('[Mock] 批量写入失败，回退到逐条写入:', err instanceof Error ? err.message : err);
       // 回退：逐条写入
       for (const rec of records) {
         try {
@@ -965,42 +1202,23 @@ async function runSyncWithMockData(): Promise<SyncResult> {
           failedCount++;
         }
       }
+      console.log(`[Mock] 逐条写入完成: 成功 ${syncedCount} 条, 失败 ${failedCount} 条`);
     }
 
-    // AI 打标：对刚写入的 Mock 数据进行真实 AI 打标
-    console.log('[Cron DEV] 开始 AI 打标...');
+    // =============== 步骤3：AI 打标 ===============
+    console.log('\n========== [步骤3] 开始 AI 打标 ==========');
     const tagResult = await autoTagFeedbacks(20);
-    console.log('==============================>hxy3 == ', 3)
     if (tagResult > 0) {
       details.push(`[Mock] AI 打标完成 ${tagResult} 条反馈`);
-      console.log(`[Cron DEV] AI 打标完成: ${tagResult} 条`);
+      console.log(`[Mock] AI 打标完成: ${tagResult} 条`);
     } else {
       details.push('[Mock] AI 打标无新数据');
+      console.log('[Mock] AI 打标: 无新数据需要打标');
     }
 
-    // Mock: 生成报告
-    details.push('[Mock] 报告生成成功');
-
-    // 使用统一的通知发送逻辑
-    const notificationResult = await sendNotification(syncedCount);
-    if (notificationResult) {
-      details.push('[Mock] 发送通知成功');
-    }
-
-    // 使用统一的周报生成逻辑
-    if (notificationResult) {
-      try {
-        const docResult = await generateWeeklyDoc();
-        if (docResult) {
-          details.push('[Mock] 生成周报文档成功');
-        } else {
-          details.push('[Mock] 生成周报文档失败');
-        }
-      } catch (docErr) {
-        console.error('[Cron DEV] 周报文档生成失败', docErr);
-        details.push(`[Mock] 生成周报文档失败: ${docErr instanceof Error ? docErr.message : '未知错误'}`);
-      }
-    }
+    // =============== 步骤4：Mock 数据同步完成 ===============
+    console.log('\n========== Mock 同步任务完成 ==========');
+    console.log(`[Mock] 总同步: ${syncedCount} 条, 失败: ${failedCount} 条`);
 
     return {
       success: true,
@@ -1011,6 +1229,7 @@ async function runSyncWithMockData(): Promise<SyncResult> {
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '未知错误';
+    console.error('[Mock] 同步任务异常:', errorMessage);
     details.push(`[Mock] 同步失败: ${errorMessage}`);
     return {
       success: false,
@@ -1022,47 +1241,56 @@ async function runSyncWithMockData(): Promise<SyncResult> {
   }
 }
 
+// 旧函数别名（保持向后兼容）
 function generateMockFeedbacks(count: number) {
-  const modules = ['极速打卡', '审批流程', '考勤统计', '薪资查询', '请假管理'];
-  const templates: Record<number, string[]> = {
-    5: ['功能非常好用，解决了实际问题', '界面设计很清晰，操作方便'],
-    4: ['整体不错，小细节可改进', '功能挺实用的，偶尔有小问题'],
-    3: ['能用的水平，没有太多惊喜', '中规中矩，和竞品比没有明显优势'],
-    2: ['最近经常崩溃，严重影响使用', '响应速度太慢了'],
-    1: ['太难用了，浪费时间', '全是bug，没法正常使用'],
-  };
-  const scores = [1, 2, 3, 4, 5];
-  const weights = [15, 20, 30, 20, 15];
-  const rand = (w: number[]) => {
-    const total = w.reduce((a, b) => a + b, 0);
-    let r = Math.random() * total;
-    for (let i = 0; i < w.length; i++) {
-      r -= w[i];
-      if (r <= 0) return scores[i];
-    }
-    return 3;
-  };
-
-  return Array.from({ length: count }, (_, i) => {
-    const score = rand(weights);
-    const module = modules[Math.floor(Math.random() * modules.length)];
-    const content = templates[score][Math.floor(Math.random() * templates[score].length)];
-    return {
-      id: i + 1,
-      content,
-      module,
-      score,
-      created_at: `2026-06-${String(Math.floor(Math.random() * 15) + 1).padStart(2, '0')} ${String(Math.floor(Math.random() * 12) + 8).padStart(2, '0')}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`,
-      tenantId: `T${String(Math.floor(Math.random() * 10) + 1).padStart(3, '0')}`,
-      tenantName: `租户${Math.floor(Math.random() * 10) + 1}`,
-      tenantScale: ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'][Math.floor(Math.random() * 6)],
-      userId: `U${String(i + 1).padStart(4, '0')}`,
-    };
-  });
+  const { feedbackList } = batchGenFeedback(count);
+  // 转换为旧格式（兼容其他调用）
+  return feedbackList.map(fb => ({
+    id: fb.反馈ID,
+    content: fb.反馈原文,
+    module: fb.反馈平台,
+    score: fb.评分,
+    created_at: fb.创建时间,
+    tenantId: fb.租户ID,
+    tenantName: fb.租户名称,
+    tenantScale: fb.租户规模,
+    userId: fb.用户ID,
+  }));
 }
 
 async function mockAutoTag(count: number): Promise<number> {
   // Mock 打标：简单返回，不实际更新（避免大量 API 调用）
   console.log(`[Cron DEV] Mock 打标跳过（${count} 条待处理）`);
   return 0;
+}
+
+// ============================================
+// 辅助函数
+// ============================================
+
+/**
+ * 从 KV 配置读取置信度阈值
+ * @param ownerId 用户配置 ID（可选）
+ * @returns 置信度阈值，默认 0.8
+ */
+async function getConfidenceThreshold(ownerId?: string): Promise<number> {
+  const defaultThreshold = 0.8;
+  const effectiveOwnerId = ownerId || process.env.DEFAULT_OWNER_ID || 'default_owner';
+
+  try {
+    const config = await getConfig(effectiveOwnerId);
+    if (config && typeof config === 'object') {
+      const tagging = (config as Record<string, unknown>).tagging as Record<string, unknown> | undefined;
+      if (tagging && typeof tagging.confidenceThreshold === 'number') {
+        const threshold = tagging.confidenceThreshold;
+        console.log(`[Cron] 从配置读取置信度阈值: ${threshold} (ownerId: ${effectiveOwnerId})`);
+        return threshold;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Cron] 读取置信度阈值配置失败，使用默认值 ${defaultThreshold}:`, err);
+  }
+
+  console.log(`[Cron] 使用默认置信度阈值: ${defaultThreshold}`);
+  return defaultThreshold;
 }

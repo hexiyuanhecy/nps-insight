@@ -1,0 +1,1607 @@
+{
+  "tbljPeTYJXOu55Vs": {
+    "table_name": "租户信息",
+    "table_id": "tbljPeTYJXOu55Vs",
+    "fields": [
+      {
+        "field_id": "fldwqrlagc",
+        "field_name": "租户ID",
+        "is_extend": false,
+        "is_primary": true,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldMt6LsGk",
+        "field_name": "租户名称",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldJXNoKtt",
+        "field_name": "规模",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "optOqzKTp0",
+              "name": "A1"
+            },
+            {
+              "color": 1,
+              "id": "opt9AbyJjZ",
+              "name": "A2"
+            },
+            {
+              "color": 2,
+              "id": "optxR1h2Ho",
+              "name": "A3"
+            },
+            {
+              "color": 3,
+              "id": "optnSrkUb7",
+              "name": "A4"
+            },
+            {
+              "color": 4,
+              "id": "optzTO1V1r",
+              "name": "A5"
+            },
+            {
+              "color": 5,
+              "id": "optcb78Xjt",
+              "name": "A6"
+            }
+          ]
+        },
+        "type": 3,
+        "ui_type": "SingleSelect"
+      },
+      {
+        "field_id": "fldzYtImIL",
+        "field_name": "是否企业版",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 7,
+        "ui_type": "Checkbox"
+      },
+      {
+        "field_id": "fld2b1WSJY",
+        "field_name": "联系人",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldlWYVUZm",
+        "field_name": "联系邮箱",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      }
+    ]
+  },
+  "tblRuKwkCmsdxei0": {
+    "table_name": "top 问题表",
+    "table_id": "tblRuKwkCmsdxei0",
+    "fields": [
+      {
+        "field_id": "fldK1JpUlr",
+        "field_name": "index",
+        "is_extend": false,
+        "is_primary": true,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldEU6Dr7Z",
+        "field_name": "所属模块",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "filter_info": {
+            "conditions": {
+              "children": [
+                {
+                  "field_id": "fldxPs9P4N",
+                  "field_type": 4,
+                  "operator": "contains",
+                  "value": null
+                }
+              ],
+              "conjunction": "and"
+            },
+            "target_table": "tblbvwlRfKEshGm9"
+          },
+          "formatter": "",
+          "formula": "bitable::$table[tblbvwlRfKEshGm9].FILTER(CurrentValue.$column[fldxPs9P4N].CONTAIN(bitable::$table[tblRuKwkCmsdxei0].$field[fldLDUQ4il])).$column[fldpA7hTUW].LISTCOMBINE().UNIQUE()",
+          "roll_up": 6,
+          "target_field": "fldpA7hTUW"
+        },
+        "type": 19,
+        "ui_type": "Lookup"
+      },
+      {
+        "field_id": "fldLDUQ4il",
+        "field_name": "tag2",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "optTz2cGB3",
+              "name": "通用体验"
+            },
+            {
+              "color": 1,
+              "id": "optckP7PCv",
+              "name": "稳定性"
+            },
+            {
+              "color": 2,
+              "id": "optiAM2KRJ",
+              "name": "性能"
+            },
+            {
+              "color": 3,
+              "id": "optutaIRz4",
+              "name": "UI/UX"
+            },
+            {
+              "color": 4,
+              "id": "optujmDFSL",
+              "name": "易用性"
+            },
+            {
+              "color": 5,
+              "id": "optxbmTCnr",
+              "name": "竞争力"
+            },
+            {
+              "color": 6,
+              "id": "opt99MCvEw",
+              "name": "满意度"
+            },
+            {
+              "color": 7,
+              "id": "optRC2U995",
+              "name": "功能性"
+            },
+            {
+              "color": 8,
+              "id": "optCh8zI6c",
+              "name": "体验优化"
+            },
+            {
+              "color": 9,
+              "id": "optQYbz1Zx",
+              "name": "产品竞争力"
+            },
+            {
+              "color": 0,
+              "id": "opt5x7MrAJ",
+              "name": "用户体验"
+            },
+            {
+              "color": 1,
+              "id": "optwjXoqwX",
+              "name": "产品优化"
+            },
+            {
+              "color": 2,
+              "id": "optgGcW0My",
+              "name": "功能价值"
+            },
+            {
+              "color": 3,
+              "id": "optDMBHALe",
+              "name": "UI/UX设计"
+            },
+            {
+              "color": 4,
+              "id": "opt9F3yGc8",
+              "name": "竞品对比"
+            },
+            {
+              "color": 5,
+              "id": "optJ8JKqab",
+              "name": "整体体验"
+            },
+            {
+              "color": 6,
+              "id": "optExENUaJ",
+              "name": "整体稳定性"
+            },
+            {
+              "color": 7,
+              "id": "optjxwcLiD",
+              "name": "UI设计"
+            },
+            {
+              "color": 8,
+              "id": "optXSOPv85",
+              "name": "产品体验"
+            },
+            {
+              "color": 9,
+              "id": "optU7DwHOt",
+              "name": "细节优化"
+            },
+            {
+              "color": 0,
+              "id": "optgRoEfjy",
+              "name": "功能实用性"
+            },
+            {
+              "color": 1,
+              "id": "optwyxCvLd",
+              "name": "细节体验"
+            },
+            {
+              "color": 2,
+              "id": "optMQyvvHY",
+              "name": "系统稳定性"
+            },
+            {
+              "color": 3,
+              "id": "optmKBjX5W",
+              "name": "功能稳定性"
+            },
+            {
+              "color": 4,
+              "id": "opt7BWXLcE",
+              "name": "价值认可"
+            },
+            {
+              "color": 5,
+              "id": "optNtr1qXt",
+              "name": "性能表现"
+            },
+            {
+              "color": 6,
+              "id": "opthmsIVar",
+              "name": "功能体验"
+            },
+            {
+              "color": 7,
+              "id": "optzv7lP8c",
+              "name": "市场竞争力"
+            }
+          ]
+        },
+        "type": 3,
+        "ui_type": "SingleSelect"
+      },
+      {
+        "field_id": "fldmebCj84",
+        "field_name": "tag3",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "filter_info": {
+            "conditions": {
+              "children": [
+                {
+                  "field_id": "fldxPs9P4N",
+                  "field_type": 4,
+                  "operator": "contains",
+                  "value": null
+                }
+              ],
+              "conjunction": "and"
+            },
+            "target_table": "tblbvwlRfKEshGm9"
+          },
+          "formatter": "",
+          "formula": "bitable::$table[tblbvwlRfKEshGm9].FILTER(CurrentValue.$column[fldxPs9P4N].CONTAIN(bitable::$table[tblRuKwkCmsdxei0].$field[fldLDUQ4il])).$column[fldIYBDyjD].LISTCOMBINE().UNIQUE()",
+          "roll_up": 6,
+          "target_field": "fldIYBDyjD"
+        },
+        "type": 19,
+        "ui_type": "Lookup"
+      },
+      {
+        "field_id": "fldv00VqdZ",
+        "field_name": "总反馈数",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "filter_info": {
+            "conditions": {
+              "children": [
+                {
+                  "field_id": "fldxPs9P4N",
+                  "field_type": 4,
+                  "operator": "contains",
+                  "value": null
+                }
+              ],
+              "conjunction": "and"
+            },
+            "target_table": "tblbvwlRfKEshGm9"
+          },
+          "formatter": "",
+          "formula": "bitable::$table[tblbvwlRfKEshGm9].FILTER(CurrentValue.$column[fldxPs9P4N].CONTAIN(bitable::$table[tblRuKwkCmsdxei0].$field[fldLDUQ4il])).$column[fldxPs9P4N].LISTCOMBINE().COUNTA()",
+          "roll_up": 2,
+          "target_field": "fldxPs9P4N"
+        },
+        "type": 19,
+        "ui_type": "Lookup"
+      },
+      {
+        "field_id": "fldrCr8aAN",
+        "field_name": "A4反馈数",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "filter_info": {
+            "conditions": {
+              "children": [
+                {
+                  "field_id": "fldxPs9P4N",
+                  "field_type": 4,
+                  "operator": "contains",
+                  "value": null
+                },
+                {
+                  "field_id": "fldk6xoWtL",
+                  "field_type": 3,
+                  "operator": "is",
+                  "value": null
+                }
+              ],
+              "conjunction": "and"
+            },
+            "target_table": "tblbvwlRfKEshGm9"
+          },
+          "formatter": "0",
+          "formula": "bitable::$table[tblbvwlRfKEshGm9].FILTER(CurrentValue.$column[fldxPs9P4N].CONTAIN(bitable::$table[tblRuKwkCmsdxei0].$field[fldLDUQ4il])&&CurrentValue.$column[fldk6xoWtL]=bitable::$table[tblbvwlRfKEshGm9].$column[fldk6xoWtL].$option[optnSrkUb7]).$column[fldxPs9P4N].LISTCOMBINE().COUNTA()",
+          "roll_up": 2,
+          "target_field": "fldxPs9P4N"
+        },
+        "type": 19,
+        "ui_type": "Lookup"
+      },
+      {
+        "field_id": "fld8dMC6nO",
+        "field_name": "A5反馈数",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "filter_info": {
+            "conditions": {
+              "children": [
+                {
+                  "field_id": "fldxPs9P4N",
+                  "field_type": 4,
+                  "operator": "contains",
+                  "value": null
+                },
+                {
+                  "field_id": "fldk6xoWtL",
+                  "field_type": 3,
+                  "operator": "is",
+                  "value": null
+                }
+              ],
+              "conjunction": "and"
+            },
+            "target_table": "tblbvwlRfKEshGm9"
+          },
+          "formatter": "0",
+          "formula": "bitable::$table[tblbvwlRfKEshGm9].FILTER(CurrentValue.$column[fldxPs9P4N].CONTAIN(bitable::$table[tblRuKwkCmsdxei0].$field[fldLDUQ4il])&&CurrentValue.$column[fldk6xoWtL]=bitable::$table[tblbvwlRfKEshGm9].$column[fldk6xoWtL].$option[optzTO1V1r]).$column[fldxPs9P4N].LISTCOMBINE().COUNTA()",
+          "roll_up": 2,
+          "target_field": "fldxPs9P4N"
+        },
+        "type": 19,
+        "ui_type": "Lookup"
+      },
+      {
+        "field_id": "fldzhDs2wi",
+        "field_name": "A6反馈数",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "filter_info": {
+            "conditions": {
+              "children": [
+                {
+                  "field_id": "fldxPs9P4N",
+                  "field_type": 4,
+                  "operator": "contains",
+                  "value": null
+                },
+                {
+                  "field_id": "fldk6xoWtL",
+                  "field_type": 3,
+                  "operator": "is",
+                  "value": null
+                }
+              ],
+              "conjunction": "and"
+            },
+            "target_table": "tblbvwlRfKEshGm9"
+          },
+          "formatter": "0",
+          "formula": "bitable::$table[tblbvwlRfKEshGm9].FILTER(CurrentValue.$column[fldxPs9P4N].CONTAIN(bitable::$table[tblRuKwkCmsdxei0].$field[fldLDUQ4il])&&CurrentValue.$column[fldk6xoWtL]=bitable::$table[tblbvwlRfKEshGm9].$column[fldk6xoWtL].$option[optcb78Xjt]).$column[fldxPs9P4N].LISTCOMBINE().COUNTA()",
+          "roll_up": 2,
+          "target_field": "fldxPs9P4N"
+        },
+        "type": 19,
+        "ui_type": "Lookup"
+      },
+      {
+        "field_id": "fldQHLEu5N",
+        "field_name": "大租户反馈数",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "filter_info": {
+            "conditions": {
+              "children": [
+                {
+                  "field_id": "fldxPs9P4N",
+                  "field_type": 4,
+                  "operator": "contains",
+                  "value": null
+                },
+                {
+                  "field_id": "fldk6xoWtL",
+                  "field_type": 3,
+                  "operator": "contains",
+                  "value": null
+                }
+              ],
+              "conjunction": "and"
+            },
+            "target_table": "tblbvwlRfKEshGm9"
+          },
+          "formatter": "0",
+          "formula": "bitable::$table[tblbvwlRfKEshGm9].FILTER(CurrentValue.$column[fldxPs9P4N].CONTAIN(bitable::$table[tblRuKwkCmsdxei0].$field[fldLDUQ4il])&&CurrentValue.$column[fldk6xoWtL].CONTAIN(LIST(bitable::$table[tblbvwlRfKEshGm9].$column[fldk6xoWtL].$option[optzTO1V1r],bitable::$table[tblbvwlRfKEshGm9].$column[fldk6xoWtL].$option[optnSrkUb7],bitable::$table[tblbvwlRfKEshGm9].$column[fldk6xoWtL].$option[optcb78Xjt]))).$column[fldxPs9P4N].LISTCOMBINE().COUNTA()",
+          "roll_up": 2,
+          "target_field": "fldxPs9P4N"
+        },
+        "type": 19,
+        "ui_type": "Lookup"
+      },
+      {
+        "field_id": "fldsq0Bj8g",
+        "field_name": "大租户占比",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "formatter": "",
+          "formula_expression": "IF(\n  bitable::$table[tblRuKwkCmsdxei0].$field[fldQHLEu5N].SUM() = 0,\n  0,\n  TEXT(bitable::$table[tblRuKwkCmsdxei0].$field[fldQHLEu5N].SUM() / bitable::$table[tblRuKwkCmsdxei0].$field[fldv00VqdZ].MAP(IFERROR(VALUE(CurrentValue), 0)).SUM(), \"0.0%\")\n)",
+          "type": {
+            "data_type": 2,
+            "ui_property": {
+              "formatter": "0"
+            },
+            "ui_type": "Number"
+          }
+        },
+        "type": 20,
+        "ui_type": "Formula"
+      },
+      {
+        "field_id": "fld5Cl3VWM",
+        "field_name": "人工排序",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "formatter": "0.0"
+        },
+        "type": 2,
+        "ui_type": "Number"
+      },
+      {
+        "field_id": "fldPqF1kQX",
+        "field_name": "负责人",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldixAHtQJ",
+        "field_name": "解决方案",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldQEbx1hu",
+        "field_name": "状态",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "opt25hCBB7",
+              "name": "待讨论"
+            },
+            {
+              "color": 1,
+              "id": "optgnlxPNc",
+              "name": "已排期"
+            },
+            {
+              "color": 2,
+              "id": "optkSuMgZP",
+              "name": "已上线"
+            },
+            {
+              "color": 3,
+              "id": "opt218ZPwy",
+              "name": "验证中"
+            }
+          ]
+        },
+        "type": 3,
+        "ui_type": "SingleSelect"
+      },
+      {
+        "field_id": "fldS0ZX1Pk",
+        "field_name": "迭代周期",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "optKTxqYTt",
+              "name": "Sprint 1"
+            },
+            {
+              "color": 1,
+              "id": "optcHuPexi",
+              "name": "Sprint 2"
+            },
+            {
+              "color": 2,
+              "id": "opt9wcimcg",
+              "name": "Sprint 3+"
+            },
+            {
+              "color": 3,
+              "id": "optxpyMDBF",
+              "name": "待定"
+            }
+          ]
+        },
+        "type": 3,
+        "ui_type": "SingleSelect"
+      }
+    ]
+  },
+  "tblbvwlRfKEshGm9": {
+    "table_name": "反馈列表",
+    "table_id": "tblbvwlRfKEshGm9",
+    "fields": [
+      {
+        "field_id": "fldrK5rZIo",
+        "field_name": "反馈ID",
+        "is_extend": false,
+        "is_primary": true,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fld8wzJXSf",
+        "field_name": "租户ID",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldxFTvDMq",
+        "field_name": "租户名称",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "filter_info": {
+            "conditions": {
+              "children": [
+                {
+                  "field_id": "fldwqrlagc",
+                  "field_type": 1,
+                  "operator": "is",
+                  "value": null
+                }
+              ],
+              "conjunction": "and"
+            },
+            "target_table": "tbljPeTYJXOu55Vs"
+          },
+          "formatter": "",
+          "formula": "bitable::$table[tbljPeTYJXOu55Vs].FILTER(CurrentValue.$column[fldwqrlagc]=bitable::$table[tblbvwlRfKEshGm9].$field[fld8wzJXSf]).$column[fldMt6LsGk].LISTCOMBINE()",
+          "roll_up": 0,
+          "target_field": "fldMt6LsGk"
+        },
+        "type": 19,
+        "ui_type": "Lookup"
+      },
+      {
+        "field_id": "fldk6xoWtL",
+        "field_name": "租户规模",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "optOqzKTp0",
+              "name": "A1"
+            },
+            {
+              "color": 1,
+              "id": "opt9AbyJjZ",
+              "name": "A2"
+            },
+            {
+              "color": 2,
+              "id": "optxR1h2Ho",
+              "name": "A3"
+            },
+            {
+              "color": 3,
+              "id": "optnSrkUb7",
+              "name": "A4"
+            },
+            {
+              "color": 4,
+              "id": "optzTO1V1r",
+              "name": "A5"
+            },
+            {
+              "color": 5,
+              "id": "optcb78Xjt",
+              "name": "A6"
+            }
+          ]
+        },
+        "type": 3,
+        "ui_type": "SingleSelect"
+      },
+      {
+        "field_id": "fldQhJVaGG",
+        "field_name": "用户ID",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldzPdKAZq",
+        "field_name": "创建时间",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "auto_fill": false,
+          "date_formatter": "yyyy/MM/dd"
+        },
+        "type": 5,
+        "ui_type": "DateTime"
+      },
+      {
+        "field_id": "fldtL3Dsxl",
+        "field_name": "不满意原因",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "optKxwbLIE",
+              "name": "系统卡顿"
+            },
+            {
+              "color": 1,
+              "id": "optYFAqfIm",
+              "name": "界面不美观"
+            },
+            {
+              "color": 2,
+              "id": "optkNhhlTW",
+              "name": "功能缺失"
+            },
+            {
+              "color": 3,
+              "id": "optcFk1jok",
+              "name": "打开速度慢"
+            },
+            {
+              "color": 4,
+              "id": "optq8q5IYd",
+              "name": "其他"
+            },
+            {
+              "color": 5,
+              "id": "opt3fmZX2u",
+              "name": "缺少功能"
+            }
+          ]
+        },
+        "type": 4,
+        "ui_type": "MultiSelect"
+      },
+      {
+        "field_id": "fldVTTpfHv",
+        "field_name": "反馈原文",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldHEilqGm",
+        "field_name": "翻译后文本",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldau8nurW",
+        "field_name": "tag1",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "opteYIfQ9O",
+              "name": "疑似Bug"
+            },
+            {
+              "color": 1,
+              "id": "optysn6Jdq",
+              "name": "功能优化"
+            },
+            {
+              "color": 2,
+              "id": "optyi03moE",
+              "name": "界面改进"
+            },
+            {
+              "color": 3,
+              "id": "optctmlSy5",
+              "name": "性能提升"
+            },
+            {
+              "color": 4,
+              "id": "optT595LwW",
+              "name": "用户教育"
+            },
+            {
+              "color": 5,
+              "id": "opteeBWLpL",
+              "name": "安全合规"
+            },
+            {
+              "color": 6,
+              "id": "optT5YzyOu",
+              "name": "无效反馈"
+            },
+            {
+              "color": 7,
+              "id": "opt1550376867",
+              "name": "细节优化"
+            },
+            {
+              "color": 8,
+              "id": "opt182380809",
+              "name": "易用性"
+            }
+          ]
+        },
+        "type": 4,
+        "ui_type": "MultiSelect"
+      },
+      {
+        "field_id": "fldxPs9P4N",
+        "field_name": "tag2",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "optTz2cGB3",
+              "name": "通用体验"
+            },
+            {
+              "color": 1,
+              "id": "optckP7PCv",
+              "name": "稳定性"
+            },
+            {
+              "color": 2,
+              "id": "optiAM2KRJ",
+              "name": "性能"
+            },
+            {
+              "color": 3,
+              "id": "optutaIRz4",
+              "name": "UI/UX"
+            },
+            {
+              "color": 4,
+              "id": "optujmDFSL",
+              "name": "易用性"
+            },
+            {
+              "color": 5,
+              "id": "optxbmTCnr",
+              "name": "竞争力"
+            },
+            {
+              "color": 6,
+              "id": "opt99MCvEw",
+              "name": "满意度"
+            },
+            {
+              "color": 7,
+              "id": "optRC2U995",
+              "name": "功能性"
+            },
+            {
+              "color": 8,
+              "id": "optCh8zI6c",
+              "name": "体验优化"
+            },
+            {
+              "color": 9,
+              "id": "optQYbz1Zx",
+              "name": "产品竞争力"
+            },
+            {
+              "color": 0,
+              "id": "opt5x7MrAJ",
+              "name": "用户体验"
+            },
+            {
+              "color": 1,
+              "id": "optwjXoqwX",
+              "name": "产品优化"
+            },
+            {
+              "color": 2,
+              "id": "optgGcW0My",
+              "name": "功能价值"
+            },
+            {
+              "color": 3,
+              "id": "optDMBHALe",
+              "name": "UI/UX设计"
+            },
+            {
+              "color": 4,
+              "id": "opt9F3yGc8",
+              "name": "竞品对比"
+            },
+            {
+              "color": 5,
+              "id": "optJ8JKqab",
+              "name": "整体体验"
+            },
+            {
+              "color": 6,
+              "id": "optExENUaJ",
+              "name": "整体稳定性"
+            },
+            {
+              "color": 7,
+              "id": "optjxwcLiD",
+              "name": "UI设计"
+            },
+            {
+              "color": 8,
+              "id": "optXSOPv85",
+              "name": "产品体验"
+            },
+            {
+              "color": 9,
+              "id": "optU7DwHOt",
+              "name": "细节优化"
+            },
+            {
+              "color": 0,
+              "id": "optgRoEfjy",
+              "name": "功能实用性"
+            },
+            {
+              "color": 1,
+              "id": "optwyxCvLd",
+              "name": "细节体验"
+            },
+            {
+              "color": 2,
+              "id": "optMQyvvHY",
+              "name": "系统稳定性"
+            },
+            {
+              "color": 3,
+              "id": "optmKBjX5W",
+              "name": "功能稳定性"
+            },
+            {
+              "color": 4,
+              "id": "opt7BWXLcE",
+              "name": "价值认可"
+            },
+            {
+              "color": 5,
+              "id": "optNtr1qXt",
+              "name": "性能表现"
+            },
+            {
+              "color": 6,
+              "id": "opthmsIVar",
+              "name": "功能体验"
+            },
+            {
+              "color": 7,
+              "id": "optzv7lP8c",
+              "name": "市场竞争力"
+            }
+          ]
+        },
+        "type": 4,
+        "ui_type": "MultiSelect"
+      },
+      {
+        "field_id": "fldIYBDyjD",
+        "field_name": "tag3",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "opte1EjNNK",
+              "name": "不好用"
+            },
+            {
+              "color": 1,
+              "id": "optSbIDPYA",
+              "name": "太卡"
+            },
+            {
+              "color": 2,
+              "id": "opt1535859883",
+              "name": "系统卡顿"
+            },
+            {
+              "color": 3,
+              "id": "opt1264084638",
+              "name": "界面不美观"
+            },
+            {
+              "color": 4,
+              "id": "opt1988133453",
+              "name": "和竞品比没有明显优势"
+            },
+            {
+              "color": 5,
+              "id": "opt1213658910",
+              "name": "功能缺失"
+            },
+            {
+              "color": 6,
+              "id": "opt1544415166",
+              "name": "缺少功能"
+            },
+            {
+              "color": 7,
+              "id": "opt1955405265",
+              "name": "小细节可改进"
+            },
+            {
+              "color": 8,
+              "id": "opt1268827995",
+              "name": "太难用了"
+            },
+            {
+              "color": 9,
+              "id": "opt1893979827",
+              "name": "没有太多惊喜"
+            }
+          ]
+        },
+        "type": 4,
+        "ui_type": "MultiSelect"
+      },
+      {
+        "field_id": "fldUAPeZMX",
+        "field_name": "评分",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "formatter": "0.0"
+        },
+        "type": 2,
+        "ui_type": "Number"
+      },
+      {
+        "field_id": "fldpA7hTUW",
+        "field_name": "反馈平台",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "optatleF6J",
+              "name": "管理后台"
+            },
+            {
+              "color": 1,
+              "id": "optApk4L8C",
+              "name": "请假员工端"
+            },
+            {
+              "color": 2,
+              "id": "optQesUvDw",
+              "name": "打卡小程序"
+            }
+          ]
+        },
+        "type": 3,
+        "ui_type": "SingleSelect"
+      },
+      {
+        "field_id": "fldnpBXMkK",
+        "field_name": "AI 置信度",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "formatter": "0.0"
+        },
+        "type": 2,
+        "ui_type": "Number"
+      },
+      {
+        "field_id": "fldGz2RN5P",
+        "field_name": "需查日志",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 7,
+        "ui_type": "Checkbox"
+      },
+      {
+        "field_id": "fldu4rCBYq",
+        "field_name": "待审核",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 7,
+        "ui_type": "Checkbox"
+      },
+      {
+        "field_id": "fldsLiMFcR",
+        "field_name": "打标状态",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "optPVjphwJ",
+              "name": "未打标"
+            },
+            {
+              "color": 1,
+              "id": "optUt7hifB",
+              "name": "已打标"
+            }
+          ]
+        },
+        "type": 3,
+        "ui_type": "SingleSelect"
+      }
+    ]
+  },
+  "tblJtwhN6m71qLnn": {
+    "table_name": "Tag3表",
+    "table_id": "tblJtwhN6m71qLnn",
+    "fields": [
+      {
+        "field_id": "fldCbygymy",
+        "field_name": "tagId",
+        "is_extend": false,
+        "is_primary": true,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fld5CkaUE9",
+        "field_name": "tagName",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "opte1EjNNK",
+              "name": "不好用"
+            },
+            {
+              "color": 1,
+              "id": "optSbIDPYA",
+              "name": "太卡"
+            },
+            {
+              "color": 2,
+              "id": "opt1535859883",
+              "name": "系统卡顿"
+            },
+            {
+              "color": 3,
+              "id": "opt1264084638",
+              "name": "界面不美观"
+            },
+            {
+              "color": 4,
+              "id": "opt1988133453",
+              "name": "和竞品比没有明显优势"
+            },
+            {
+              "color": 5,
+              "id": "opt1213658910",
+              "name": "功能缺失"
+            },
+            {
+              "color": 6,
+              "id": "opt1544415166",
+              "name": "缺少功能"
+            },
+            {
+              "color": 7,
+              "id": "opt1955405265",
+              "name": "小细节可改进"
+            },
+            {
+              "color": 8,
+              "id": "opt1268827995",
+              "name": "太难用了"
+            },
+            {
+              "color": 9,
+              "id": "opt1893979827",
+              "name": "没有太多惊喜"
+            }
+          ]
+        },
+        "type": 3,
+        "ui_type": "SingleSelect"
+      },
+      {
+        "field_id": "fldPiHQZ84",
+        "field_name": "desc",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldnzyqtCa",
+        "field_name": "count",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "filter_info": {
+            "conditions": {
+              "children": [
+                {
+                  "field_id": "fldIYBDyjD",
+                  "field_type": 4,
+                  "operator": "contains",
+                  "value": null
+                }
+              ],
+              "conjunction": "and"
+            },
+            "target_table": "tblbvwlRfKEshGm9"
+          },
+          "formatter": "0",
+          "formula": "bitable::$table[tblbvwlRfKEshGm9].FILTER(CurrentValue.$column[fldIYBDyjD].CONTAIN(bitable::$table[tblJtwhN6m71qLnn].$field[fld5CkaUE9])).$column[fldIYBDyjD].LISTCOMBINE().COUNTA()",
+          "roll_up": 2,
+          "target_field": "fldIYBDyjD"
+        },
+        "type": 19,
+        "ui_type": "Lookup"
+      }
+    ]
+  },
+  "tbl59iVHgHPyeLmj": {
+    "table_name": "Tag1表",
+    "table_id": "tbl59iVHgHPyeLmj",
+    "fields": [
+      {
+        "field_id": "fldA18dvV5",
+        "field_name": "tagId",
+        "is_extend": false,
+        "is_primary": true,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldQkTiNxp",
+        "field_name": "tagName",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "opteYIfQ9O",
+              "name": "疑似Bug"
+            },
+            {
+              "color": 1,
+              "id": "optysn6Jdq",
+              "name": "功能优化"
+            },
+            {
+              "color": 2,
+              "id": "optyi03moE",
+              "name": "界面改进"
+            },
+            {
+              "color": 3,
+              "id": "optctmlSy5",
+              "name": "性能提升"
+            },
+            {
+              "color": 4,
+              "id": "optT595LwW",
+              "name": "用户教育"
+            },
+            {
+              "color": 5,
+              "id": "opteeBWLpL",
+              "name": "安全合规"
+            },
+            {
+              "color": 6,
+              "id": "optT5YzyOu",
+              "name": "无效反馈"
+            },
+            {
+              "color": 7,
+              "id": "opt1550376867",
+              "name": "细节优化"
+            },
+            {
+              "color": 8,
+              "id": "opt182380809",
+              "name": "易用性"
+            }
+          ]
+        },
+        "type": 3,
+        "ui_type": "SingleSelect"
+      },
+      {
+        "field_id": "fldUmAk8Tj",
+        "field_name": "desc",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldrI9CoAM",
+        "field_name": "count",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "filter_info": {
+            "conditions": {
+              "children": [
+                {
+                  "field_id": "fldau8nurW",
+                  "field_type": 4,
+                  "operator": "contains",
+                  "value": null
+                }
+              ],
+              "conjunction": "and"
+            },
+            "target_table": "tblbvwlRfKEshGm9"
+          },
+          "formatter": "0",
+          "formula": "bitable::$table[tblbvwlRfKEshGm9].FILTER(CurrentValue.$column[fldau8nurW].CONTAIN(bitable::$table[tbl59iVHgHPyeLmj].$field[fldQkTiNxp])).$column[fldau8nurW].LISTCOMBINE().COUNTA()",
+          "roll_up": 2,
+          "target_field": "fldau8nurW"
+        },
+        "type": 19,
+        "ui_type": "Lookup"
+      }
+    ]
+  },
+  "tblnNtMHDn92HPdu": {
+    "table_name": "Tag2表",
+    "table_id": "tblnNtMHDn92HPdu",
+    "fields": [
+      {
+        "field_id": "fld7XfueV2",
+        "field_name": "tagId",
+        "is_extend": false,
+        "is_primary": true,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldKFmlyJ0",
+        "field_name": "tagName",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "options": [
+            {
+              "color": 0,
+              "id": "optTz2cGB3",
+              "name": "通用体验"
+            },
+            {
+              "color": 1,
+              "id": "optckP7PCv",
+              "name": "稳定性"
+            },
+            {
+              "color": 2,
+              "id": "optiAM2KRJ",
+              "name": "性能"
+            },
+            {
+              "color": 3,
+              "id": "optutaIRz4",
+              "name": "UI/UX"
+            },
+            {
+              "color": 4,
+              "id": "optujmDFSL",
+              "name": "易用性"
+            },
+            {
+              "color": 5,
+              "id": "optxbmTCnr",
+              "name": "竞争力"
+            },
+            {
+              "color": 6,
+              "id": "opt99MCvEw",
+              "name": "满意度"
+            },
+            {
+              "color": 7,
+              "id": "optRC2U995",
+              "name": "功能性"
+            },
+            {
+              "color": 8,
+              "id": "optCh8zI6c",
+              "name": "体验优化"
+            },
+            {
+              "color": 9,
+              "id": "optQYbz1Zx",
+              "name": "产品竞争力"
+            },
+            {
+              "color": 0,
+              "id": "opt5x7MrAJ",
+              "name": "用户体验"
+            },
+            {
+              "color": 1,
+              "id": "optwjXoqwX",
+              "name": "产品优化"
+            },
+            {
+              "color": 2,
+              "id": "optgGcW0My",
+              "name": "功能价值"
+            },
+            {
+              "color": 3,
+              "id": "optDMBHALe",
+              "name": "UI/UX设计"
+            },
+            {
+              "color": 4,
+              "id": "opt9F3yGc8",
+              "name": "竞品对比"
+            },
+            {
+              "color": 5,
+              "id": "optJ8JKqab",
+              "name": "整体体验"
+            },
+            {
+              "color": 6,
+              "id": "optExENUaJ",
+              "name": "整体稳定性"
+            },
+            {
+              "color": 7,
+              "id": "optjxwcLiD",
+              "name": "UI设计"
+            },
+            {
+              "color": 8,
+              "id": "optXSOPv85",
+              "name": "产品体验"
+            },
+            {
+              "color": 9,
+              "id": "optU7DwHOt",
+              "name": "细节优化"
+            },
+            {
+              "color": 0,
+              "id": "optgRoEfjy",
+              "name": "功能实用性"
+            },
+            {
+              "color": 1,
+              "id": "optwyxCvLd",
+              "name": "细节体验"
+            },
+            {
+              "color": 2,
+              "id": "optMQyvvHY",
+              "name": "系统稳定性"
+            },
+            {
+              "color": 3,
+              "id": "optmKBjX5W",
+              "name": "功能稳定性"
+            },
+            {
+              "color": 4,
+              "id": "opt7BWXLcE",
+              "name": "价值认可"
+            },
+            {
+              "color": 5,
+              "id": "optNtr1qXt",
+              "name": "性能表现"
+            },
+            {
+              "color": 6,
+              "id": "opthmsIVar",
+              "name": "功能体验"
+            },
+            {
+              "color": 7,
+              "id": "optzv7lP8c",
+              "name": "市场竞争力"
+            }
+          ]
+        },
+        "type": 3,
+        "ui_type": "SingleSelect"
+      },
+      {
+        "field_id": "fldUCDyau0",
+        "field_name": "desc",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": null,
+        "type": 1,
+        "ui_type": "Text"
+      },
+      {
+        "field_id": "fldNtksy8a",
+        "field_name": "count",
+        "is_extend": false,
+        "is_primary": false,
+        "is_synced": false,
+        "property": {
+          "filter_info": {
+            "conditions": {
+              "children": [
+                {
+                  "field_id": "fldxPs9P4N",
+                  "field_type": 4,
+                  "operator": "contains",
+                  "value": null
+                }
+              ],
+              "conjunction": "and"
+            },
+            "target_table": "tblbvwlRfKEshGm9"
+          },
+          "formatter": "0",
+          "formula": "bitable::$table[tblbvwlRfKEshGm9].FILTER(CurrentValue.$column[fldxPs9P4N].CONTAIN(bitable::$table[tblnNtMHDn92HPdu].$field[fldKFmlyJ0])).$column[fldxPs9P4N].LISTCOMBINE().COUNTA()",
+          "roll_up": 2,
+          "target_field": "fldxPs9P4N"
+        },
+        "type": 19,
+        "ui_type": "Lookup"
+      }
+    ]
+  }
+}

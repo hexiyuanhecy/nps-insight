@@ -21,12 +21,9 @@ export async function GET(request: NextRequest) {
       tenantId: String(r.fields[TENANT_FIELDS.TENANT_ID] || ''),
       tenantName: String(r.fields[TENANT_FIELDS.TENANT_NAME] || ''),
       scale: String(r.fields[TENANT_FIELDS.SCALE] || ''),
+      isEnterprise: String(r.fields[TENANT_FIELDS.IS_ENTERPRISE] || ''),
       contact: String(r.fields[TENANT_FIELDS.CONTACT] || ''),
       contactEmail: String(r.fields[TENANT_FIELDS.CONTACT_EMAIL] || ''),
-      logPlatform: String(r.fields[TENANT_FIELDS.LOG_PLATFORM] || ''),
-      logEndpoint: String(r.fields[TENANT_FIELDS.LOG_ENDPOINT] || ''),
-      logCredentials: String(r.fields[TENANT_FIELDS.LOG_CREDENTIALS] || ''),
-      createdAt: String(r.fields[TENANT_FIELDS.CREATED_AT] || ''),
       recordId: r.record_id,
     }));
 
@@ -54,7 +51,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { tenantId, tenantName, scale = 'A3', contact, contactEmail, logPlatform, logEndpoint, logCredentials } = body;
+    const { tenantId, tenantName, scale = 'A3', isEnterprise, contact, contactEmail } = body;
 
     if (!tenantId || !tenantName) {
       return NextResponse.json(
@@ -67,12 +64,9 @@ export async function POST(request: NextRequest) {
       [TENANT_FIELDS.TENANT_ID]: tenantId,
       [TENANT_FIELDS.TENANT_NAME]: tenantName,
       [TENANT_FIELDS.SCALE]: scale,
+      [TENANT_FIELDS.IS_ENTERPRISE]: isEnterprise || '',
       [TENANT_FIELDS.CONTACT]: contact || '',
       [TENANT_FIELDS.CONTACT_EMAIL]: contactEmail || '',
-      [TENANT_FIELDS.LOG_PLATFORM]: logPlatform || '',
-      [TENANT_FIELDS.LOG_ENDPOINT]: logEndpoint || '',
-      [TENANT_FIELDS.LOG_CREDENTIALS]: logCredentials || '',
-      [TENANT_FIELDS.CREATED_AT]: Date.now(),
     });
 
     return NextResponse.json({
@@ -93,7 +87,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { recordId, tenantName, scale, contact, contactEmail, logPlatform, logEndpoint, logCredentials } = body;
+    const { recordId, tenantName, scale, isEnterprise, contact, contactEmail } = body;
 
     if (!recordId) {
       return NextResponse.json(
@@ -105,11 +99,9 @@ export async function PUT(request: NextRequest) {
     const fields: Record<string, unknown> = {};
     if (tenantName !== undefined) fields[TENANT_FIELDS.TENANT_NAME] = tenantName;
     if (scale !== undefined) fields[TENANT_FIELDS.SCALE] = scale;
+    if (isEnterprise !== undefined) fields[TENANT_FIELDS.IS_ENTERPRISE] = isEnterprise;
     if (contact !== undefined) fields[TENANT_FIELDS.CONTACT] = contact;
     if (contactEmail !== undefined) fields[TENANT_FIELDS.CONTACT_EMAIL] = contactEmail;
-    if (logPlatform !== undefined) fields[TENANT_FIELDS.LOG_PLATFORM] = logPlatform;
-    if (logEndpoint !== undefined) fields[TENANT_FIELDS.LOG_ENDPOINT] = logEndpoint;
-    if (logCredentials !== undefined) fields[TENANT_FIELDS.LOG_CREDENTIALS] = logCredentials;
 
     const record = await bitableClient.updateRecord(TABLE_NAMES.TENANTS, recordId, fields);
 

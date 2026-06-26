@@ -10,6 +10,8 @@ import {
   Tag,
   TestTube,
   Trash2,
+  Zap,
+  BarChart3,
 } from 'lucide-react';
 import { buildCronFromSchedule } from '@/components/admin/config-center/schedule-utils';
 import type { ConfigCenterController } from '@/components/admin/config-center/use-config-center';
@@ -376,6 +378,36 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
           </div>
           <p className="mt-2 text-xs text-slate-500">预览 Cron：<code className="rounded bg-slate-100 px-2 py-0.5 font-mono">{buildCronFromSchedule(config.schedule.analysisUnit, config.schedule.analysisEvery, config.schedule.analysisTime, config.schedule.analysisWeekDay, config.schedule.analysisMonthDay)}</code></p>
           <p className="mt-1 text-xs text-slate-500">自动生成 Top 问题表与会议文档</p>
+        </div>
+
+        {/* 手动触发任务 */}
+        <div className="mt-6 rounded-lg border border-blue-100 bg-blue-50/50 p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Zap className="h-4 w-4 text-blue-600" />
+            <span className="text-sm font-medium text-slate-700">手动触发任务</span>
+            <span className="text-xs text-slate-500">（点击后请查看浏览器控制台和终端日志）</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <PrimaryButton
+              onClick={ctrl.runWeeklyTagging}
+              loading={ctrl.isLoading}
+              icon={<PlayCircle className="h-4 w-4" />}
+            >
+              开始周打标
+            </PrimaryButton>
+            <PrimaryButton
+              onClick={ctrl.runMonthlyAnalysis}
+              loading={ctrl.isLoading}
+              icon={<BarChart3 className="h-4 w-4" />}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              开始月分析
+            </PrimaryButton>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            周打标：拉取反馈 + AI 打标 + Bot 通知 + 生成周报文档 &nbsp;|&nbsp;
+            月分析：标签自进化 + Top问题生成 + 公式同步 + 会议文档 + 通知
+          </p>
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">

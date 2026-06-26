@@ -64,7 +64,7 @@ export interface Feedback {
   /** 用户ID */
   userId: string;
   /** 用户名称 */
-  userName: string;
+  userName?: string;
   /** 创建时间 */
   createTime: string;
   /** 不满意原因（PRD v2：不满意原因，多选） */
@@ -430,6 +430,7 @@ export type BitableFieldType =
   | 'MultiSelect'    // 多选
   | 'DateTime'       // 日期时间
   | 'Checkbox'       // 复选框
+  | 'Textarea'       // 多行文本
   | 'User'           // 人员
   | 'Phone'          // 电话
   | 'Email'          // 邮箱

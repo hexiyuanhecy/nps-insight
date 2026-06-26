@@ -18,17 +18,25 @@ const memoryCache = new Map<string, string>();
  * 获取 KV 客户端，带降级处理
  */
 async function getKvClient() {
-  if (kvClient) return kvClient;
+  if (kvClient !== null) return kvClient;
+
+  // 先检查环境变量是否配置，未配置则直接降级到内存缓存
+  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
+    console.warn('[KV] KV 环境变量未配置，使用内存缓存降级');
+    kvClient = null;
+    return null;
+  }
 
   try {
     const { createClient } = await import('@vercel/kv');
     kvClient = createClient({
-      url: process.env.KV_REST_API_URL!,
-      token: process.env.KV_REST_API_TOKEN!,
+      url: process.env.KV_REST_API_URL,
+      token: process.env.KV_REST_API_TOKEN,
     });
     return kvClient;
   } catch {
     // KV 不可用，使用内存缓存
+    kvClient = null;
     return null;
   }
 }

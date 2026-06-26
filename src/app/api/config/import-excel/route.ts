@@ -121,8 +121,8 @@ export async function POST(request: NextRequest) {
       };
 
       // 可选字段：只在有值时才设置
+      // 注意：租户名称是自动计算字段，不写入
       if (f.tenantId) fields[FEEDBACK_FIELDS.TENANT_ID] = f.tenantId;
-      if (f.tenantName) fields[FEEDBACK_FIELDS.TENANT_NAME] = f.tenantName;
       if (f.tenantScale) fields[FEEDBACK_FIELDS.TENANT_SCALE] = f.tenantScale;
       if (f.larkUserId) fields[FEEDBACK_FIELDS.USER_ID] = f.larkUserId;
       if (f.dissatisfactionReason) fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] = f.dissatisfactionReason;

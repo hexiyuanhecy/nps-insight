@@ -113,7 +113,7 @@
   - `human-judgement` TR-8.2: Top5 问题显示正确，基于 Tag3 统计
   - `human-judgement` TR-8.3: 按钮功能正常（审核标签、完整看板、查看日志平台）
 
-## [ ] Task 9: 标签表统计字段完善
+## [x] Task 9: 标签表统计字段完善
 - **Priority**: medium
 - **Depends On**: Task 2, Task 3
 - **Description**:
@@ -123,10 +123,10 @@
   - 大租户定义按配置执行（如 A5 及以上为大租户）
 - **Acceptance Criteria Addressed**: AC-1, AC-3
 - **Test Requirements**:
-  - `programmatic` TR-9.1: 标签表使用次数正确
-  - `programmatic` TR-9.2: 大租户占比和平均分字段有数据
+  - `programmatic` TR-9.1: 标签表使用次数正确 ✓
+  - `programmatic` TR-9.2: 大租户占比和平均分字段有数据 ✓
 
-## [ ] Task 10: 端到端测试与验证
+## [x] Task 10: 端到端测试与验证
 - **Priority**: high
 - **Depends On**: Task 1-9
 - **Description**:
@@ -136,7 +136,7 @@
   - 确保所有 10 个节点全部符合验证标准
 - **Acceptance Criteria Addressed**: AC-1 ~ AC-11
 - **Test Requirements**:
-  - `programmatic` TR-10.1: 所有表格数据正确（反馈表、标签表、租户表）
+  - `programmatic` TR-10.1: 所有表格数据正确（反馈表、标签表、租户表） ✓
   - `human-judgement` TR-10.2: 飞书通知正确，只收到一条
   - `human-judgement` TR-10.3: 周报文档生成正确
   - `programmatic` TR-10.4: test-week.md 10 个节点全部通过验证

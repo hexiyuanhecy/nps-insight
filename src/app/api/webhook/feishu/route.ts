@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FeishuWebhookEvent, BotCommand } from '@/lib/types';
 import { feishuBot, createHelpCard, createAnalysisCard, createFeedbackCard, createOnboardingCard } from '@/lib/feishu/bot';
-import { bitableClient } from '@/lib/feishu/bitable';
+import { bitableClient, extractMultiSelectFieldValue } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, ANALYSIS_FIELDS } from '@/lib/feishu/constants';
 import { handleQuestion } from '@/lib/ai/chatbot';
 
@@ -319,16 +319,17 @@ async function handleFeedback(cmd: BotCommand): Promise<void> {
     for (const record of records.slice(0, limit)) {
       const feedback = {
         userName: String(
-          record.fields[FEEDBACK_FIELDS.USER_NAME] || '匿名用户'
+          record.fields[FEEDBACK_FIELDS.USER_ID] || '匿名用户'
         ),
         module: String(
           record.fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] || '未分类'
         ),
         npsScore: Number(record.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0),
         content: String(record.fields[FEEDBACK_FIELDS.CONTENT] || ''),
-        tag1: String(record.fields[FEEDBACK_FIELDS.TAG1] || ''),
-        tag2: String(record.fields[FEEDBACK_FIELDS.TAG2] || ''),
-        tag3: String(record.fields[FEEDBACK_FIELDS.TAG3] || '')
+        // MultiSelect 字段读取后用逗号连接成字符串
+        tag1: extractMultiSelectFieldValue(record.fields[FEEDBACK_FIELDS.TAG1]).join(', '),
+        tag2: extractMultiSelectFieldValue(record.fields[FEEDBACK_FIELDS.TAG2]).join(', '),
+        tag3: extractMultiSelectFieldValue(record.fields[FEEDBACK_FIELDS.TAG3]).join(', ')
       }
 
       await feishuBot.sendCardMessage(cmd.chatId, createFeedbackCard(feedback));
@@ -362,11 +363,11 @@ async function handleStatus(cmd: BotCommand): Promise<void> {
     const tagged = records.filter((r) => String(r.fields[FEEDBACK_FIELDS.STATUS]) === '已打标').length;
     const reviewNeeded = records.filter((r) => {
       const val = r.fields[FEEDBACK_FIELDS.REVIEW_NEEDED];
-      return val === true || String(val).toLowerCase() === 'true';
+      return val === true || String(val).toLowerCase() === 'true' || String(val).toLowerCase() === '是';
     }).length;
     const needLogCheck = records.filter((r) => {
       const val = r.fields[FEEDBACK_FIELDS.NEED_LOG_CHECK];
-      return val === true || String(val).toLowerCase() === 'true';
+      return val === true || String(val).toLowerCase() === 'true' || String(val).toLowerCase() === '是';
     }).length;
 
     const avgScore = total > 0

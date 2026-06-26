@@ -6,6 +6,8 @@ import {
   linkBitable,
   retagHistory as retagHistoryApi,
   runManualSync as runManualSyncApi,
+  runWeeklyTagging as runWeeklyTaggingApi,
+  runMonthlyAnalysis as runMonthlyAnalysisApi,
   saveConfigV3,
   testAiConnection,
   testFeishuConnection,
@@ -184,6 +186,7 @@ export function useConfigActions({
     if (!config) return;
     try {
       setIsLoading(true);
+      console.log('==============================>hxy22222 == ', 22222)
       const result = await retagHistoryApi(config);
       pushToast(result.success ? '已启动重新打标' : '失败: ' + result.error, result.success ? 'success' : 'error');
     } catch (error) {
@@ -192,6 +195,44 @@ export function useConfigActions({
       setIsLoading(false);
     }
   }, [config, pushToast, setIsLoading]);
+
+  // 手动触发周打标流程
+  const runWeeklyTagging = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      console.log('【周打标】手动触发，开始执行...');
+      console.log('【周打标】请打开浏览器控制台查看详细日志');
+      const result = await runWeeklyTaggingApi();
+      if (result.success) {
+        pushToast('周打标已启动，详细日志请查看控制台', 'success');
+      } else {
+        pushToast('周打标启动失败: ' + (result.error || '未知错误'), 'error');
+      }
+    } catch (error) {
+      pushToast('周打标失败: ' + (error instanceof Error ? error.message : '未知错误'), 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [pushToast, setIsLoading]);
+
+  // 手动触发月分析流程
+  const runMonthlyAnalysis = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      console.log('【月分析】手动触发，开始执行...');
+      console.log('【月分析】请打开浏览器控制台查看详细日志');
+      const result = await runMonthlyAnalysisApi();
+      if (result.success) {
+        pushToast('月分析已启动，详细日志请查看控制台', 'success');
+      } else {
+        pushToast('月分析启动失败: ' + (result.error || '未知错误'), 'error');
+      }
+    } catch (error) {
+      pushToast('月分析失败: ' + (error instanceof Error ? error.message : '未知错误'), 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [pushToast, setIsLoading]);
 
   const persistScheduleAndSave = useCallback(async () => {
     if (!config) return;
@@ -281,6 +322,8 @@ export function useConfigActions({
     testAI,
     testNotify,
     runManualSync,
+    runWeeklyTagging,
+    runMonthlyAnalysis,
     createTable,
     linkTable,
     retagHistory,

@@ -315,10 +315,7 @@ export class TagEvolution {
     // 1. 创建合并后的新标签
     const mergedTag = await this.storage.createRecord(table, {
       [fields.TAG_ID]: `${Date.now()}`,
-      [fields.NAME]: mergedName,
-      [fields.USAGE_COUNT]: (tag1.fields.usageCount || 0) + (tag2.fields.usageCount || 0),
-      [fields.LARGE_TENANT_COUNT]: Math.max(tag1.fields.largeTenantCount || 0, tag2.fields.largeTenantCount || 0),
-      [fields.LARGE_TENANT_RATIO]: 0,
+      [fields.TAG_NAME]: mergedName,
     });
 
     const mergedRecordId = mergedTag.record_id;
@@ -372,10 +369,7 @@ export class TagEvolution {
       newTagNames.map(name => ({
         fields: {
           [fields.TAG_ID]: `${Date.now()}-${name}`,
-          [fields.NAME]: name,
-          [fields.USAGE_COUNT]: 0,
-          [fields.LARGE_TENANT_COUNT]: 0,
-          [fields.LARGE_TENANT_RATIO]: 0,
+          [fields.TAG_NAME]: name,
         },
       }))
     );
@@ -401,17 +395,17 @@ export class TagEvolution {
     const fields = table === 'tag1' ? TAG1_FIELDS : table === 'tag2' ? TAG2_FIELDS : TAG3_FIELDS;
 
     const baseFields: Record<string, unknown> = {
-      name: String(record.fields[fields.NAME] || ''),
+      name: String(record.fields[fields.TAG_NAME] || ''),
       level,
-      usageCount: Number(record.fields[fields.USAGE_COUNT] || 0),
-      largeTenantCount: Number(record.fields[fields.LARGE_TENANT_COUNT] || 0),
-      largeTenantRatio: Number(record.fields[fields.LARGE_TENANT_RATIO] || 0),
+      usageCount: Number(record.fields[fields.COUNT] || 0),
+      largeTenantCount: 0,
+      largeTenantRatio: 0,
     };
 
     if (table === 'tag1') {
-      baseFields.definition = String(record.fields[(fields as typeof TAG1_FIELDS).DEFINITION] || '');
-      baseFields.status = String(record.fields[(fields as typeof TAG1_FIELDS).STATUS] || 'active');
-      baseFields.createdBy = String(record.fields[(fields as typeof TAG1_FIELDS).CREATED_BY] || 'AI');
+      baseFields.definition = String(record.fields[(fields as typeof TAG1_FIELDS).DESC] || '');
+      baseFields.status = 'active';
+      baseFields.createdBy = 'AI';
     }
 
     return {

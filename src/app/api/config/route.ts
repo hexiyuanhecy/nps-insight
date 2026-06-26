@@ -14,6 +14,9 @@ import fs from 'fs';
 import path from 'path';
 import { AdapterFactory } from '@/lib/data-sources/adapter-factory';
 import { LLMProviderFactory } from '@/lib/llm/provider-factory';
+import { bitableClient, initializeBitableConfig } from '@/lib/feishu/bitable';
+import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
+import { tagger } from '@/lib/ai/tagger';
 import {
   addBitableAdminMembers,
   createNPSInsightBitable,
@@ -21,8 +24,11 @@ import {
   validateAndGetBitableInfo,
   checkRequiredFields,
   addMissingFields,
+  initializeTag1Labels,
+  saveTag1ToBitable,
 } from '@/lib/feishu/bitable-setup';
 import { notifyConfigChange } from '@/lib/notification/delay-notifier';
+import { setConfig } from '@/lib/storage/kv-storage';
 
 // ============================================
 // 默认配置（当环境变量为空时使用）
@@ -234,15 +240,13 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '未知错误';
+    console.error('[API /config GET] 错误:', error);
     return NextResponse.json(
       { success: false, error: errorMessage },
       { status: 500 }
     );
   }
 }
-
-// ============================================
-// POST - 更新配置 / 测试连接
 // ============================================
 
 export async function POST(request: NextRequest) {
@@ -275,6 +279,9 @@ export async function POST(request: NextRequest) {
       case 'runManualSync':
         return runManualSyncAction(body.config);
 
+      case 'retagHistory':
+        return retagHistoryAction();
+
       case 'saveConfig':
         return saveConfigLegacy(body);
 
@@ -289,6 +296,7 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '未知错误';
+    console.error('[API /config POST] 错误:', error);
     return NextResponse.json(
       { success: false, error: errorMessage },
       { status: 500 }
@@ -359,6 +367,30 @@ async function saveConfigV3(config: any) {
     // 5. 标签 & 规则
     if (config.tag1) {
       notifyConfigChange('tagging', 'tag1', JSON.stringify(config.tag1));
+
+      // 同步 Tag1 到多维表格
+      const bitableAppToken = config.bitable?.appToken || process.env.BITABLE_TOKEN || '';
+      const bitableTagsTableId = config.bitable?.tagsTableId || process.env.BITABLE_TAGS_TABLE_ID || '';
+      if (bitableAppToken) {
+        try {
+          console.log('[Tag1同步] 开始同步 Tag1 到多维表格...');
+          const syncResult = await saveTag1ToBitable(bitableAppToken, config.tag1, bitableTagsTableId || undefined);
+          console.log(`[Tag1同步] 同步结果: 新增 ${syncResult.created}, 更新 ${syncResult.updated}, 删除 ${syncResult.deleted}`);
+          if (syncResult.errors.length > 0) {
+            console.warn('[Tag1同步] 部分同步失败:', syncResult.errors);
+          }
+
+          // Tag1 变更后，安排5分钟延时自动重打标
+          // 如果用户想立即重打标，可以点击"立即重新打标历史数据"按钮（会取消这个延时任务）
+          console.log('[Tag1同步] 安排5分钟延时自动重打标...');
+          await scheduleDelayRetagTask();
+        } catch (syncError) {
+          console.error('[Tag1同步] 同步失败:', syncError instanceof Error ? syncError.message : '未知错误');
+          // 同步失败不影响主流程，只记录日志
+        }
+      } else {
+        console.log('[Tag1同步] 未配置多维表格，跳过同步');
+      }
     }
     if (typeof config.tag2Init !== 'undefined') {
       notifyConfigChange('tagging', 'tag2Init', config.tag2Init || '');
@@ -496,6 +528,49 @@ async function saveConfigV3(config: any) {
     console.log('[Config] .env file updated');
   } catch (error) {
     console.error('[Config] Failed to write .env:', error);
+  }
+
+  // 同步到 KV 存储
+  try {
+    const ownerId = process.env.DEFAULT_OWNER_ID || 'default_owner';
+    // 从现有配置构建完整的 KV 配置对象
+    const currentConfig = buildV3Config();
+    const kvConfig = {
+      ...currentConfig,
+      // 合并传入的新配置
+      feishu: config.feishu ? { ...currentConfig.feishu, ...config.feishu } : currentConfig.feishu,
+      bitable: config.bitable ? { ...currentConfig.bitable, ...config.bitable } : currentConfig.bitable,
+      dataSource: config.dataSource ? { ...currentConfig.dataSource, ...config.dataSource } : currentConfig.dataSource,
+      ai: config.ai ? { ...currentConfig.ai, ...config.ai } : currentConfig.ai,
+      tag1: config.tag1 || currentConfig.tag1,
+      tag2Init: config.tag2Init !== undefined ? config.tag2Init : currentConfig.tag2Init,
+      tagging: config.tagging ? { ...currentConfig.tagging, ...config.tagging } : currentConfig.tagging,
+      schedule: config.schedule ? { ...currentConfig.schedule, ...config.schedule } : currentConfig.schedule,
+      logPlatform: config.logPlatform ? { ...currentConfig.logPlatform, ...config.logPlatform } : currentConfig.logPlatform,
+      notification: config.notification ? { ...currentConfig.notification, ...config.notification } : currentConfig.notification,
+    };
+    await setConfig(ownerId, kvConfig);
+    console.log('[Config] 配置已同步到 KV storage');
+  } catch (kvError) {
+    console.error('[Config] KV 同步失败:', kvError);
+    // KV 同步失败不影响主流程，只记录日志
+  }
+
+  // 已绑定表格时，异步调用飞书协作者API，不阻塞主线程
+  const hasBitableToken = !!(process.env.BITABLE_TOKEN || config.bitable?.appToken);
+  const adminUserIds = config.notification?.adminUserIds;
+  if (hasBitableToken && adminUserIds && String(adminUserIds).trim()) {
+    const appToken = config.bitable?.appToken || process.env.BITABLE_TOKEN || '';
+    // fire-and-forget：异步添加协作者，不等待结果
+    addBitableAdminMembers(appToken, adminUserIds).then((result) => {
+      if (result.failCount > 0) {
+        console.warn('[Config] 部分管理员添加失败:', result.errors);
+      } else {
+        console.log('[Config] 管理员协作者添加成功:', result.successCount);
+      }
+    }).catch((err) => {
+      console.error('[Config] 添加管理员协作者异常:', err instanceof Error ? err.message : '未知错误');
+    });
   }
 
   return NextResponse.json({
@@ -723,37 +798,7 @@ async function createBitableAction(data: any) {
     notifyConfigChange('bitable', 'appToken', result.appToken);
     notifyConfigChange('bitable', 'url', newUrl);
 
-    // 获取管理员用户 ID
-    const adminUserIds = data.config?.notification?.adminUserIds ||
-      data.notification?.adminUserIds ||
-      process.env.NOTIFICATION_ADMIN_USER_IDS ||
-      '';
-
-    // 自动将管理员添加为表格协作者
-    let adminAddResult: { successCount: number; failCount: number; errors: string[] } | null = null;
-    if (adminUserIds && String(adminUserIds).trim()) {
-      console.log('[创建表格] 开始添加管理员协作者...');
-      adminAddResult = await addBitableAdminMembers(result.appToken, adminUserIds);
-      if (adminAddResult.failCount > 0) {
-        console.warn('[创建表格] 部分管理员添加失败:', adminAddResult.errors);
-      }
-    }
-
-    const baseConfig = buildV3Config();
-    const updatedConfig = {
-      ...baseConfig,
-      bitable: {
-        ...baseConfig.bitable,
-        mode: 'link',
-        appToken: result.appToken,
-        url: newUrl,
-        status: 'linked',
-      },
-    };
-    await saveConfigV3(updatedConfig);
-    console.log('[创建表格] 配置已持久化到 .env');
-    console.log('[创建表格] appToken:', result.appToken);
-
+    const appToken = result.appToken;
     const tables: any = {
       feedbackTableId: result.tables?.feedbackTableId || '',
       tagsTableId: result.tables?.tag1TableId || result.tables?.tag2TableId || result.tables?.tag3TableId || '',
@@ -761,24 +806,79 @@ async function createBitableAction(data: any) {
       analysisTableId: result.tables?.periodTableId || '',
     };
 
-    // 构建成功消息
-    let successMessage = '多维表格创建成功';
-    if (adminAddResult) {
-      if (adminAddResult.failCount === 0) {
-        successMessage += `，已将 ${adminAddResult.successCount} 位管理员添加为协作者`;
-      } else {
-        successMessage += `，但有 ${adminAddResult.failCount} 位管理员添加失败（可能权限不足，请手动添加）`;
-      }
-    }
+    // 获取管理员用户 ID
+    const adminUserIds = data.config?.notification?.adminUserIds ||
+      data.notification?.adminUserIds ||
+      process.env.NOTIFICATION_ADMIN_USER_IDS ||
+      '';
+
+    // 启动并行异步任务组（fire-and-forget）
+    // 异步1：校验并补充全表字段完整性
+    // 异步2：异步API添加表格协作者
+    Promise.allSettled([
+      // 异步任务1：校验/补充字段
+      (async () => {
+        try {
+          console.log('[创建表格-异步] 开始校验字段完整性...');
+          const validation = await validateAndGetBitableInfo(appToken);
+          if (validation.valid && validation.tables) {
+            const fieldCheck = checkRequiredFields(validation.tables);
+            if (fieldCheck.missingFields.length > 0 && fieldCheck.feedbackTableId) {
+              await addMissingFields(appToken, fieldCheck.feedbackTableId, fieldCheck.missingFields);
+              console.log(`[创建表格-异步] 已补充 ${fieldCheck.missingFields.length} 个缺失字段`);
+            } else {
+              console.log('[创建表格-异步] 字段完整性校验通过');
+            }
+          }
+        } catch (err) {
+          console.error('[创建表格-异步] 字段校验失败:', err instanceof Error ? err.message : '未知错误');
+        }
+      })(),
+      // 异步任务2：添加管理员协作者
+      (async () => {
+        try {
+          if (adminUserIds && String(adminUserIds).trim()) {
+            console.log('[创建表格-异步] 开始添加管理员协作者...');
+            const adminResult = await addBitableAdminMembers(appToken, adminUserIds);
+            if (adminResult.failCount > 0) {
+              console.warn('[创建表格-异步] 部分管理员添加失败:', adminResult.errors);
+            } else {
+              console.log(`[创建表格-异步] 管理员协作者添加成功: ${adminResult.successCount} 位`);
+            }
+          }
+        } catch (err) {
+          console.error('[创建表格-异步] 添加管理员协作者异常:', err instanceof Error ? err.message : '未知错误');
+        }
+      })(),
+    ]).catch((err) => {
+      console.error('[创建表格-异步] 并行任务异常:', err instanceof Error ? err.message : '未知错误');
+    });
+
+    // 保存配置到 .env 和 KV（异步，不阻塞主线程）
+    const baseConfig = buildV3Config();
+    const updatedConfig = {
+      ...baseConfig,
+      bitable: {
+        ...baseConfig.bitable,
+        mode: 'link',
+        appToken: appToken,
+        url: newUrl,
+        status: 'linked',
+      },
+    };
+    saveConfigV3(updatedConfig).catch((err) => {
+      console.error('[创建表格] 配置持久化失败:', err instanceof Error ? err.message : '未知错误');
+    });
+
+    console.log('[创建表格] 主流程完成，appToken:', appToken);
 
     return NextResponse.json({
       success: true,
-      message: successMessage,
+      message: '多维表格创建成功，正在后台完成字段校验和权限配置',
       data: {
-        appToken: result.appToken,
+        appToken,
         url: newUrl,
         tables,
-        adminAddResult,
       },
     });
   } catch (error) {
@@ -826,28 +926,11 @@ async function linkBitableAction(data: any) {
       );
     }
 
-    if (fieldCheck.missingFields.length > 0 && fieldCheck.feedbackTableId) {
-      await addMissingFields(appToken, fieldCheck.feedbackTableId, fieldCheck.missingFields);
-    }
-
     // 获取管理员用户 ID
     const adminUserIds = data.config?.notification?.adminUserIds ||
       data.notification?.adminUserIds ||
       process.env.NOTIFICATION_ADMIN_USER_IDS ||
       '';
-
-    // 自动将管理员添加为表格协作者
-    let adminAddResult: { successCount: number; failCount: number; errors: string[] } | null = null;
-    if (adminUserIds && String(adminUserIds).trim()) {
-      console.log('[绑定表格] 开始添加管理员协作者...');
-      adminAddResult = await addBitableAdminMembers(appToken, adminUserIds);
-      if (adminAddResult.failCount > 0) {
-        console.warn('[绑定表格] 部分管理员添加失败:', adminAddResult.errors);
-      }
-    }
-
-    notifyConfigChange('bitable', 'appToken', appToken);
-    notifyConfigChange('bitable', 'url', data.url || `https://www.feishu.cn/base/${appToken}`);
 
     const tables: any = {
       feedbackTableId: fieldCheck.feedbackTableId || '',
@@ -856,18 +939,77 @@ async function linkBitableAction(data: any) {
       analysisTableId: fieldCheck.analysisTableId || '',
     };
 
-    // 构建成功消息
-    let successMessage = fieldCheck.missingFields.length > 0
-      ? `关联成功，已补充 ${fieldCheck.missingFields.length} 个缺失字段`
-      : '关联成功';
-
-    if (adminAddResult) {
-      if (adminAddResult.failCount === 0) {
-        successMessage += `，已将 ${adminAddResult.successCount} 位管理员添加为协作者`;
-      } else {
-        successMessage += `，但有 ${adminAddResult.failCount} 位管理员添加失败（可能权限不足，请手动添加）`;
-      }
+    // 如果有缺失字段，先补充（同步执行，因为绑定前必须确保字段完整）
+    if (fieldCheck.missingFields.length > 0 && fieldCheck.feedbackTableId) {
+      await addMissingFields(appToken, fieldCheck.feedbackTableId, fieldCheck.missingFields);
     }
+
+    // 启动并行异步任务组（fire-and-forget）
+    // 异步1：二次校验全表字段完整性
+    // 异步2：异步API添加配置管理员协作者
+    Promise.allSettled([
+      // 异步任务1：二次校验字段完整性
+      (async () => {
+        try {
+          console.log('[绑定表格-异步] 开始二次校验字段完整性...');
+          const reValidation = await validateAndGetBitableInfo(appToken);
+          if (reValidation.valid && reValidation.tables) {
+            const reCheck = checkRequiredFields(reValidation.tables);
+            if (reCheck.missingFields.length > 0 && reCheck.feedbackTableId) {
+              await addMissingFields(appToken, reCheck.feedbackTableId, reCheck.missingFields);
+              console.log(`[绑定表格-异步] 已补充 ${reCheck.missingFields.length} 个缺失字段`);
+            } else {
+              console.log('[绑定表格-异步] 字段完整性校验通过');
+            }
+          }
+        } catch (err) {
+          console.error('[绑定表格-异步] 二次字段校验失败:', err instanceof Error ? err.message : '未知错误');
+        }
+      })(),
+      // 异步任务2：添加管理员协作者
+      (async () => {
+        try {
+          if (adminUserIds && String(adminUserIds).trim()) {
+            console.log('[绑定表格-异步] 开始添加管理员协作者...');
+            const adminResult = await addBitableAdminMembers(appToken, adminUserIds);
+            if (adminResult.failCount > 0) {
+              console.warn('[绑定表格-异步] 部分管理员添加失败:', adminResult.errors);
+            } else {
+              console.log(`[绑定表格-异步] 管理员协作者添加成功: ${adminResult.successCount} 位`);
+            }
+          }
+        } catch (err) {
+          console.error('[绑定表格-异步] 添加管理员协作者异常:', err instanceof Error ? err.message : '未知错误');
+        }
+      })(),
+    ]).catch((err) => {
+      console.error('[绑定表格-异步] 并行任务异常:', err instanceof Error ? err.message : '未知错误');
+    });
+
+    notifyConfigChange('bitable', 'appToken', appToken);
+    notifyConfigChange('bitable', 'url', data.url || `https://www.feishu.cn/base/${appToken}`);
+
+    // 保存配置到 .env 和 KV（异步，不阻塞主线程）
+    saveConfigV3({
+      bitable: {
+        mode: 'link',
+        appToken,
+        url: data.url || `https://www.feishu.cn/base/${appToken}`,
+        feedbackTableId: tables.feedbackTableId,
+        tagsTableId: tables.tagsTableId,
+        tenantsTableId: tables.tenantsTableId,
+        analysisTableId: tables.analysisTableId,
+      },
+    }).catch((err) => {
+      console.error('[绑定表格] 配置持久化失败:', err instanceof Error ? err.message : '未知错误');
+    });
+
+    console.log('[绑定表格] 主流程完成，appToken:', appToken);
+
+    // 构建成功消息（基于主流程结果）
+    const successMessage = fieldCheck.missingFields.length > 0
+      ? `关联成功，已补充 ${fieldCheck.missingFields.length} 个缺失字段，正在后台完成权限配置`
+      : '关联成功，正在后台完成权限配置';
 
     return NextResponse.json({
       success: true,
@@ -877,7 +1019,6 @@ async function linkBitableAction(data: any) {
         url: `https://www.feishu.cn/base/${appToken}`,
         tables,
         missingFields: fieldCheck.missingFields,
-        adminAddResult,
       },
     });
   } catch (error) {
@@ -934,4 +1075,298 @@ async function runManualSyncAction(config: any) {
       { status: 500 }
     );
   }
+}
+
+// ============================================
+// 重新打标历史数据
+// ============================================
+
+/**
+ * 获取置信度阈值（从环境变量或配置）
+ */
+async function getRetagConfidenceThreshold(): Promise<number> {
+  // 优先从环境变量读取
+  const envThreshold = parseFloat(process.env.CONFIG_CONFIDENCE || '');
+  if (!isNaN(envThreshold) && envThreshold >= 0 && envThreshold <= 1) {
+    return envThreshold;
+  }
+  // 默认值
+  return 0.8;
+}
+
+/**
+ * 重新打标历史数据 - 获取所有已打标的反馈并重新进行AI打标
+ */
+async function retagHistoryAction() {
+  const startTime = Date.now();
+  let totalRecords = 0;
+  let successCount = 0;
+  let failCount = 0;
+  let skippedCount = 0;
+
+  try {
+    console.log('[Retag] 开始重新打标历史数据...');
+
+    // 取消待执行的延时重打标任务（用户选择了立即重打标）
+    await cancelDelayRetagTask();
+
+    // 1. 初始化飞书配置
+    await initializeBitableConfig();
+
+    // 2. 获取置信度阈值
+    const confidenceThreshold = await getRetagConfidenceThreshold();
+    console.log(`[Retag] 使用置信度阈值: ${confidenceThreshold}`);
+
+    // 3. 获取所有反馈记录（不分页，一次性获取）
+    const allRecords = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
+      pageSize: 500,
+    });
+
+    if (allRecords.length === 0) {
+      return NextResponse.json({
+        success: true,
+        message: '没有找到反馈记录',
+        data: { totalRecords: 0, successCount: 0, failCount: 0, skippedCount: 0 },
+      });
+    }
+
+    // 4. 过滤出有内容的记录（有内容的才需要打标）
+    const recordsWithContent = allRecords.filter(r => {
+      const content = String(r.fields[FEEDBACK_FIELDS.CONTENT] || '');
+      return content.trim().length > 0;
+    });
+
+    totalRecords = recordsWithContent.length;
+    console.log(`[Retag] 找到 ${totalRecords} 条有内容的反馈记录`);
+
+    if (totalRecords === 0) {
+      return NextResponse.json({
+        success: true,
+        message: '没有找到有内容的反馈记录',
+        data: { totalRecords: 0, successCount: 0, failCount: 0, skippedCount: 0 },
+      });
+    }
+
+    // 5. 预加载标签（缓存 5 分钟）
+    const existingTags = await tagger.getCachedTags();
+    const tag1List = existingTags.filter(t => t.tag1Name).map(t => t.tag1Name);
+    const tag2List = existingTags.filter(t => t.tag2Name).map(t => t.tag2Name);
+    const tag3List = existingTags.filter(t => t.tag3Name).map(t => t.tag3Name);
+    console.log(`[Retag] 标签体系: Tag1=${tag1List.length}, Tag2=${tag2List.length}, Tag3=${tag3List.length}`);
+
+    // 6. 批量处理（每批50条）
+    const batchSize = 50;
+    for (let i = 0; i < recordsWithContent.length; i += batchSize) {
+      const batch = recordsWithContent.slice(i, i + batchSize);
+      const batchNum = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(recordsWithContent.length / batchSize);
+      console.log(`[Retag] 处理批次 ${batchNum}/${totalBatches}（${batch.length} 条）`);
+
+      const t0 = Date.now();
+
+      // 构建批量输入
+      const feedbacks = batch.map((record) => ({
+        record_id: record.record_id,
+        content: String(record.fields[FEEDBACK_FIELDS.CONTENT] || ''),
+        score: Number(record.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0),
+        source: String(record.fields[FEEDBACK_FIELDS.SOURCE] || ''),
+        unsatReason: String(record.fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] || ''),
+      }));
+
+      // 调用 AI 批量打标
+      const results = await tagger.batchAnalyzeFeedbacks(feedbacks, existingTags, confidenceThreshold);
+
+      const elapsed = Date.now() - t0;
+      const batchSuccess = results.filter(r => r.success).length;
+      console.log(`[Retag] 批次 ${batchNum} AI分析完成 (${elapsed}ms, 成功 ${batchSuccess}/${results.length})`);
+
+      // 第一步：收集本批次所有标签名，确保存在并获取 record_id 映射
+      const tag1RecordIdMap = new Map<string, string>();
+      const tag2RecordIdMap = new Map<string, string>();
+      const tag3RecordIdMap = new Map<string, string>();
+
+      const allTag1Names = new Set<string>();
+      const allTag2Names = new Set<string>();
+      const allTag3Names = new Set<string>();
+
+      for (const result of results) {
+        if (!result.success || !result.result) continue;
+        result.result.tag1.forEach(t => t && allTag1Names.add(t));
+        result.result.tag2.forEach(t => t && allTag2Names.add(t));
+        result.result.tag3.forEach(t => t && allTag3Names.add(t));
+      }
+
+      // 批量确保标签存在并获取 record_id
+      console.log(`[Retag] 批次 ${batchNum} 确保标签存在: Tag1=${allTag1Names.size}, Tag2=${allTag2Names.size}, Tag3=${allTag3Names.size}`);
+      for (const name of Array.from(allTag1Names)) {
+        try {
+          const recordId = await tagger.ensureTagExists(name, 'tag1');
+          tag1RecordIdMap.set(name, recordId);
+        } catch (e) {
+          console.error(`[Retag] 确保Tag1存在失败 ${name}:`, e);
+        }
+      }
+      for (const name of Array.from(allTag2Names)) {
+        try {
+          const recordId = await tagger.ensureTagExists(name, 'tag2');
+          tag2RecordIdMap.set(name, recordId);
+        } catch (e) {
+          console.error(`[Retag] 确保Tag2存在失败 ${name}:`, e);
+        }
+      }
+      for (const name of Array.from(allTag3Names)) {
+        try {
+          const recordId = await tagger.ensureTagExists(name, 'tag3');
+          tag3RecordIdMap.set(name, recordId);
+        } catch (e) {
+          console.error(`[Retag] 确保Tag3存在失败 ${name}:`, e);
+        }
+      }
+
+      // 第二步：用 record_id 写入反馈表的关联字段
+      const updates = results
+        .filter(r => r.success && r.result)
+        .map(r => {
+          const tag1RecordIds = (r.result!.tag1 || [])
+            .map(t => tag1RecordIdMap.get(t))
+            .filter((id): id is string => !!id);
+          const tag2RecordIds = (r.result!.tag2 || [])
+            .map(t => tag2RecordIdMap.get(t))
+            .filter((id): id is string => !!id);
+          const tag3RecordIds = (r.result!.tag3 || [])
+            .map(t => tag3RecordIdMap.get(t))
+            .filter((id): id is string => !!id);
+
+          return {
+            record_id: r.recordId,
+            fields: {
+              [FEEDBACK_FIELDS.TAG1]: tag1RecordIds,
+              [FEEDBACK_FIELDS.TAG2]: tag2RecordIds,
+              [FEEDBACK_FIELDS.TAG3]: tag3RecordIds,
+              [FEEDBACK_FIELDS.CONFIDENCE]: r.result!.confidence,
+              [FEEDBACK_FIELDS.NEED_LOG_CHECK]: r.result!.needLogCheck ? '是' : '否',
+              [FEEDBACK_FIELDS.REVIEW_NEEDED]: r.result!.reviewNeeded ? '是' : '否',
+              [FEEDBACK_FIELDS.TRANSLATED_CONTENT]: r.result!.translatedContent || '',
+              [FEEDBACK_FIELDS.STATUS]: '已打标',
+            },
+          };
+        });
+
+      if (updates.length > 0) {
+        try {
+          await bitableClient.batchUpdateRecords(TABLE_NAMES.FEEDBACK, updates);
+          successCount += updates.length;
+        } catch (updateErr) {
+          console.error(`[Retag] 批量更新失败，逐条更新:`, updateErr);
+          for (const update of updates) {
+            try {
+              await bitableClient.updateRecord(TABLE_NAMES.FEEDBACK, update.record_id, update.fields);
+              successCount++;
+            } catch {
+              failCount++;
+            }
+          }
+        }
+      }
+
+      failCount += results.filter(r => !r.success).length;
+      skippedCount += results.filter(r => !r.success).length;
+    }
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[Retag] 重打标完成，总计成功 ${successCount}/${totalRecords}，失败 ${failCount}，耗时 ${totalTime}ms`);
+
+    return NextResponse.json({
+      success: true,
+      message: `重新打标完成：成功 ${successCount} 条，失败 ${failCount} 条`,
+      data: {
+        totalRecords,
+        successCount,
+        failCount,
+        skippedCount,
+        elapsedMs: totalTime,
+      },
+    });
+  } catch (error) {
+    console.error('[Retag] 重新打标失败:', error);
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : '未知错误' },
+      { status: 500 }
+    );
+  }
+}
+
+// ============================================
+// 5分钟延时自动重打标
+// ============================================
+
+/**
+ * 延时重打标任务管理器
+ * 使用全局变量存储待执行的延时任务
+ * 注意：在 Vercel serverless 环境下，setTimeout 在函数结束后不会执行
+ *       此功能仅在持久化服务器环境（如传统 Node.js 服务器）下有效
+ */
+interface DelayRetagTask {
+  timeoutId: NodeJS.Timeout;
+  scheduledAt: number;
+}
+
+// 全局变量存储延时任务（仅在服务端进程生命周期内有效）
+let globalDelayRetagTask: DelayRetagTask | null = null;
+
+// 延时5分钟
+const DELAY_RETAG_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * 安排延时重打标任务（5分钟后执行）
+ * 如果已存在延时任务，先取消旧的
+ */
+async function scheduleDelayRetagTask(): Promise<void> {
+  console.log('[DelayRetag] 安排5分钟后自动重打标...');
+
+  // 取消已存在的延时任务
+  if (globalDelayRetagTask) {
+    clearTimeout(globalDelayRetagTask.timeoutId);
+    globalDelayRetagTask = null;
+    console.log('[DelayRetag] 已取消旧的重打标任务');
+  }
+
+  // 创建新的延时任务
+  const timeoutId = setTimeout(async () => {
+    console.log('[DelayRetag] 5分钟延时到达，开始执行自动重打标...');
+    globalDelayRetagTask = null;
+
+    try {
+      // 执行重打标
+      const result = await retagHistoryAction();
+      console.log('[DelayRetag] 自动重打标执行结果:', result);
+    } catch (error) {
+      console.error('[DelayRetag] 自动重打标执行失败:', error);
+    }
+  }, DELAY_RETAG_TIMEOUT_MS);
+
+  globalDelayRetagTask = {
+    timeoutId,
+    scheduledAt: Date.now(),
+  };
+
+  console.log(`[DelayRetag] 已安排 ${new Date(Date.now() + DELAY_RETAG_TIMEOUT_MS).toISOString()} 执行重打标`);
+}
+
+/**
+ * 取消待执行的延时重打标任务
+ */
+async function cancelDelayRetagTask(): Promise<void> {
+  if (globalDelayRetagTask) {
+    clearTimeout(globalDelayRetagTask.timeoutId);
+    globalDelayRetagTask = null;
+    console.log('[DelayRetag] 已取消延时重打标任务');
+  }
+}
+
+/**
+ * 检查是否存在待执行的延时重打标任务
+ */
+async function hasDelayRetagTask(): Promise<boolean> {
+  return globalDelayRetagTask !== null;
 }

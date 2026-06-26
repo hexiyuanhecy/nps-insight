@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { bitableClient, extractFieldValue } from '@/lib/feishu/bitable';
+import { bitableClient, extractFieldValue, extractMultiSelectFieldValue } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
 import { TABLES } from '@/lib/storage/base-storage';
 import { getDefaultDocument, getDefaultNotification, getDefaultStorage } from '@/lib/adapter-factory';
@@ -92,10 +92,10 @@ async function generateMonthlyReport(year?: number, month?: number): Promise<{
       const issues = await topIssuesGenerator.generate();
 
       topIssues = issues.slice(0, 20).map((issue) => ({
-        tag1: issue.tag2Name,
-        tag2: issue.tag2Name,
-        tag3: issue.tag3Names.join(', '),
-        count: issue.totalCount,
+        tag1: issue.tag2,
+        tag2: issue.tag2,
+        tag3: '',
+        count: 0,
       }));
     } catch (topError) {
       console.error('[月报] Top问题生成失败', topError);
@@ -103,9 +103,11 @@ async function generateMonthlyReport(year?: number, month?: number): Promise<{
       // 使用简单统计
       const tagCounts: Record<string, number> = {};
       monthFeedbacks.forEach((f) => {
-        const tag1 = extractFieldValue(f.fields[FEEDBACK_FIELDS.TAG1]);
-        if (tag1) {
-          tagCounts[tag1] = (tagCounts[tag1] || 0) + 1;
+        const tag1Arr = extractMultiSelectFieldValue(f.fields[FEEDBACK_FIELDS.TAG1]);
+        for (const tag1 of tag1Arr) {
+          if (tag1) {
+            tagCounts[tag1] = (tagCounts[tag1] || 0) + 1;
+          }
         }
       });
 
@@ -334,21 +336,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: result.error }, { status: 500 });
     }
 
-    // 保存到分析表
-    try {
-      await bitableClient.createRecord(TABLE_NAMES.TOP_ISSUES, {
-        ['问题标识']: `monthly_${result.year}_${String(result.month).padStart(2, '0')}`,
-        ['问题名称']: result.periodName,
-        ['开始日期']: new Date(result.startDate).getTime(),
-        ['结束日期']: new Date(result.endDate).getTime(),
-        ['反馈总数']: result.totalFeedbacks,
-        ['NPS分数']: result.npsScore,
-        ['Top问题']: JSON.stringify(result.topIssues),
-        ['创建时间']: Date.now(),
-      });
-    } catch (saveError) {
-      console.error('[API] 保存月报记录失败', saveError);
-    }
+    // 注意：Top问题表的字段结构与月报数据不匹配，不再写入Top问题表
+    // 月报数据主要通过文档和通知推送
+    console.log('[API] 月报生成完成，跳过Top问题表写入（字段结构不匹配）');
 
     // 发送通知
     const chatId = process.env.NOTIFICATION_CHAT_ID;

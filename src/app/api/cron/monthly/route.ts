@@ -8,11 +8,12 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { TagEvolution } from '@/lib/ai/tag-evolution';
+import { TagEvolution, EvolutionReport } from '@/lib/ai/tag-evolution';
+// [修改点1] 导入 V2 版本的标签自进化模块
+import { runTagEvolutionV2, TagEvolutionResultV2 } from '@/lib/ai/tag-evolution-v2';
 import { TopIssuesGenerator } from '@/lib/analysis/top-issues';
 import { FormulaSync } from '@/lib/analysis/formula-sync';
 import { getDefaultStorage, getDefaultNotification, getDefaultDocument } from '@/lib/adapter-factory';
-import { EvolutionReport } from '@/lib/ai/tag-evolution';
 import { TopIssue } from '@/lib/analysis/top-issues';
 import { createMonthlyReportCard } from '@/lib/feishu/bot';
 import { listAllConfigKeys, getConfig } from '@/lib/storage/kv-storage';
@@ -21,11 +22,12 @@ import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants'
 
 /**
  * 月度任务执行结果
+ * [修改点2] evolution 字段类型改为 V2 结果类型，兼容旧结构
  */
 interface MonthlyTaskResult {
   success: boolean;
   timestamp: number;
-  evolution: EvolutionReport | null;
+  evolution: TagEvolutionResultV2 | null;
   topIssues: TopIssue[] | null;
   formulaSync: boolean;
   meetingDoc: { documentId: string; url: string } | null;
@@ -146,13 +148,15 @@ async function handleMonthlyTaskSingleUser(): Promise<NextResponse<MonthlyTaskRe
     const now = new Date();
     const periodName = `${now.getFullYear()}年${now.getMonth() + 1}月`;
 
+    // [修改点6] DEV_MODE 下使用 V2 结果结构的模拟数据
     result.evolution = {
-      timestamp: Date.now(),
-      duplicates: [],
-      splittables: [],
-      coldTags: [],
-      hotTags: [],
-      actions: [],
+      success: true,
+      totalFeedbackCount: 0,
+      mode: 'full',
+      mergeTag3Count: 0,
+      newTag2Count: 0,
+      mergeTag2Count: 0,
+      manualReviewItems: [],
     };
     result.topIssues = [];
     result.formulaSync = true;
@@ -170,19 +174,40 @@ async function handleMonthlyTaskSingleUser(): Promise<NextResponse<MonthlyTaskRe
     const document = getDefaultDocument()
 
     // 1. 标签自进化（先执行）
-    console.log('[月度任务] 步骤1：标签自进化')
+    // [修改点3] 切换到 V2 版本的标签自进化
+    console.log('[月度任务] 步骤1：标签自进化（V2）')
     try {
-      const tagEvolution = new TagEvolution(storage)
-      result.evolution = await tagEvolution.execute()
+      result.evolution = await runTagEvolutionV2()
+
+      // ========== 日志：打印标签自进化结果 ==========
+      console.log('\n' + '='.repeat(60))
+      console.log('【月分析 - 标签自进化结果】')
+      console.log('='.repeat(60))
+      console.log(`✅ 执行状态: ${result.evolution.success ? '成功' : '失败'}`)
+      console.log(`📊 分析模式: ${result.evolution.mode === 'full' ? '全量分析' : '高频过滤'}`)
+      console.log(`📝 总反馈数: ${result.evolution.totalFeedbackCount}`)
+      console.log(`🔄 Tag3 合并数: ${result.evolution.mergeTag3Count}`)
+      console.log(`🆕 新 Tag2 数: ${result.evolution.newTag2Count}`)
+      console.log(`🔀 Tag2 合并数: ${result.evolution.mergeTag2Count}`)
+      console.log(`👀 人工复核项: ${result.evolution.manualReviewItems.length} 项`)
+      if (result.evolution.error) {
+        console.log(`⚠️  异常信息: ${result.evolution.error}`)
+      }
+      console.log('='.repeat(60) + '\n')
+      // ======================================================
+
     } catch (evoErr) {
       console.error('[月度任务] 标签自进化失败，跳过:', evoErr)
+      // 失败时返回 V2 结构的空结果，不影响后续步骤
       result.evolution = {
-        duplicates: [],
-        splittables: [],
-        coldTags: [],
-        hotTags: [],
-        actions: [],
-        timestamp: Date.now()
+        success: false,
+        totalFeedbackCount: 0,
+        mode: 'full',
+        mergeTag3Count: 0,
+        newTag2Count: 0,
+        mergeTag2Count: 0,
+        manualReviewItems: [],
+        error: evoErr instanceof Error ? evoErr.message : '未知错误'
       }
     }
 
@@ -197,6 +222,22 @@ async function handleMonthlyTaskSingleUser(): Promise<NextResponse<MonthlyTaskRe
       topIssuesGenerator.setWeights(weights)
 
       result.topIssues = await topIssuesGenerator.generate()
+
+      // ========== 日志：打印 Top 问题生成结果 ==========
+      console.log('\n' + '='.repeat(60))
+      console.log('【月分析 - Top 问题生成结果】')
+      console.log('='.repeat(60))
+      console.log(`📊 生成 Top 问题数: ${result.topIssues.length}`)
+      console.log('\n--- Top 10 问题 ---')
+      // 注意：TopIssue 类型定义中只有表字段，实际运行时有更多统计属性
+      ;(result.topIssues as any[]).slice(0, 10).forEach((issue: any, idx: number) => {
+        const tag2Name = issue.tag2 || issue.tag2Name || '-'
+        const count = issue.totalCount || issue.count || 0
+        const ratio = issue.largeTenantRatio ? (issue.largeTenantRatio * 100).toFixed(1) : '0'
+        console.log(`  ${idx + 1}. [${tag2Name}] (${count}条, 大租户占比 ${ratio}%)`)
+      })
+      console.log('='.repeat(60) + '\n')
+      // ======================================================
 
       // 写入 Top问题表
       await topIssuesGenerator.writeToTable(result.topIssues)
@@ -258,14 +299,15 @@ async function handleMonthlyTaskSingleUser(): Promise<NextResponse<MonthlyTaskRe
     const notificationChannels =
       process.env.NOTIFICATION_CHANNELS?.split(',') || []
     if (notificationChannels.length > 0) {
+      // [修改点4] 适配 V2 结果结构，从 V2 结果中获取合并数和拆分数
       const card = createMonthlyReportCard({
         periodName,
         totalFeedbacks,
         topIssueUrl: process.env.FEISHU_BITABLE_URL || '',
         documentUrl: result.meetingDoc?.url,
         dashboardUrl: process.env.FEISHU_DASHBOARD_URL || '',
-        mergeCount: result.evolution?.duplicates.length || 0,
-        splitCount: result.evolution?.splittables.length || 0,
+        mergeCount: result.evolution?.mergeTag3Count || 0,
+        splitCount: result.evolution?.newTag2Count || 0,
         topIssues: (result.topIssues || []).map((issue: any) => ({
           tag3: issue.tag3Names?.join(', ') || '',
           tag2: issue.tag2Name || '',
@@ -273,6 +315,30 @@ async function handleMonthlyTaskSingleUser(): Promise<NextResponse<MonthlyTaskRe
           largeTenantRatio: issue.largeTenantRatio || 0
         }))
       })
+
+      // ========== 日志：打印月度消息卡片内容 ==========
+      console.log('\n' + '='.repeat(60))
+      console.log('【月分析 - 消息卡片内容预览】')
+      console.log('='.repeat(60))
+      console.log(`📅 周期: ${periodName}`)
+      console.log(`📊 当月反馈总数: ${totalFeedbacks}`)
+      console.log(`🔄 Tag3 合并数: ${result.evolution?.mergeTag3Count || 0}`)
+      console.log(`🆕 新 Tag2 数: ${result.evolution?.newTag2Count || 0}`)
+      console.log(`📝 Top问题数: ${result.topIssues?.length || 0}`)
+      if (result.meetingDoc) {
+        console.log(`📄 会议文档: ${result.meetingDoc.url}`)
+      }
+      console.log('\n--- Top 问题列表 ---')
+      // 注意：topIssues 类型是 TopIssue，实际运行时可能有更多属性，用 any 断言
+      ;(result.topIssues as any[]).slice(0, 10).forEach((issue: any, idx: number) => {
+        const tag3Names = issue.tag3Names?.join(', ') || issue.tag3 || '-'
+        const tag2Name = issue.tag2 || issue.tag2Name || '-'
+        const count = issue.totalCount || issue.count || 0
+        console.log(`  ${idx + 1}. [${tag2Name}] ${tag3Names} (${count}条)` )
+      })
+      console.log('='.repeat(60) + '\n')
+      // ======================================================
+
       await notification.sendToMultiple(notificationChannels, card)
       result.notification = true
     }
@@ -302,10 +368,11 @@ async function handleMonthlyTaskForUser(ownerId: string): Promise<MonthlyTaskRes
 
 /**
  * 生成会议文档
+ * [修改点5] 适配 V2 结果结构的自进化报告
  */
 async function generateMeetingDoc(
   document: any,
-  evolution: EvolutionReport | null,
+  evolution: TagEvolutionResultV2 | null,
   topIssues: TopIssue[] | null
 ): Promise<{ documentId: string; url: string }> {
   const now = new Date();
@@ -324,26 +391,25 @@ async function generateMeetingDoc(
   content += `- 分析周期：${year}年${month}月\n`;
   content += `- Top问题数量：${topIssues?.length || 0}\n\n`;
 
-  // 标签自进化报告
+  // 标签自进化报告（V2 结构）
   if (evolution) {
     content += `## 标签自进化报告\n\n`;
-    content += `- 检测到重复标签：${evolution.duplicates.length} 组\n`;
-    content += `- 检测到可拆分标签：${evolution.splittables.length} 个\n`;
-    content += `- 冷门标签：${evolution.coldTags.length} 个（保留不处理）\n`;
-    content += `- 热门标签：${evolution.hotTags.length} 个\n\n`;
+    content += `- 执行状态：${evolution.success ? '成功' : '部分失败'}\n`;
+    content += `- 分析模式：${evolution.mode === 'full' ? '全量分析' : '高频过滤'}\n`;
+    content += `- 总反馈数：${evolution.totalFeedbackCount}\n`;
+    content += `- Tag3 合并：${evolution.mergeTag3Count} 组\n`;
+    content += `- 拆分生成新 Tag2：${evolution.newTag2Count} 个\n`;
+    content += `- Tag2 合并：${evolution.mergeTag2Count} 组\n`;
+    content += `- 人工复核项：${evolution.manualReviewItems.length} 项\n\n`;
 
-    if (evolution.duplicates.length > 0) {
-      content += `### 重复标签详情\n\n`;
-      for (const dup of evolution.duplicates) {
-        content += `- ${dup.tags[0].fields.name} 与 ${dup.tags[1].fields.name}（相似度 ${dup.similarity.toFixed(2)}）\n`;
-      }
-      content += `\n`;
+    if (evolution.error) {
+      content += `> ⚠️ 执行异常：${evolution.error}\n\n`;
     }
 
-    if (evolution.splittables.length > 0) {
-      content += `### 可拆分标签详情\n\n`;
-      for (const split of evolution.splittables) {
-        content += `- ${split.tag.fields.name}：${split.suggestion}\n`;
+    if (evolution.manualReviewItems.length > 0) {
+      content += `### 人工复核项\n\n`;
+      for (const item of evolution.manualReviewItems) {
+        content += `- ${item}\n`;
       }
       content += `\n`;
     }
@@ -352,12 +418,12 @@ async function generateMeetingDoc(
   // Top问题详情
   if (topIssues && topIssues.length > 0) {
     content += `## Top 问题详情\n\n`;
-    content += `| 排名 | Tag1 | Tag2 | Tag3 | 数量 | 大租户占比 | 平均分 | 综合评分 |\n`;
-    content += `|------|------|------|------|------|------------|--------|----------|\n`;
+    content += `| 排名 | Tag2 | 人工排序 | 负责人 | 状态 | 迭代周期 |\n`;
+    content += `|------|------|----------|--------|------|----------|\n`;
 
     for (let i = 0; i < Math.min(20, topIssues.length); i++) {
       const issue = topIssues[i];
-      content += `| ${i + 1} | ${issue.tag2Name} | ${issue.tag3Names.join(', ')} | ${issue.totalCount} | ${(issue.largeTenantRatio * 100).toFixed(1)}% | ${issue.avgScore.toFixed(1)} | ${issue.largeTenantCount} |\n`;
+      content += `| ${i + 1} | ${issue.tag2} | ${issue.manualPriority} | ${issue.owner} | ${issue.status} | ${issue.iterationPeriod} |\n`;
     }
     content += `\n`;
   }
@@ -378,5 +444,15 @@ async function generateMeetingDoc(
   content += `4. 其他事项\n\n`;
 
   // 创建文档
+  // ========== 日志：打印会议文档内容预览 ==========
+  console.log('\n' + '='.repeat(60))
+  console.log('【月分析 - 会议文档内容预览】')
+  console.log('='.repeat(60))
+  console.log(`📄 标题: ${title}`)
+  console.log('\n--- 文档内容（前 500 字）---')
+  console.log(content.substring(0, 500) + (content.length > 500 ? '\n...(已截断)' : ''))
+  console.log('='.repeat(60) + '\n')
+  // ======================================================
+
   return document.create(title, content);
 }

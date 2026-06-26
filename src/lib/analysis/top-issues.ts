@@ -9,25 +9,17 @@ import { BitableRecord } from '@/lib/types';
 import { TOP_ISSUES_FIELDS, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS, FEEDBACK_FIELDS } from '../feishu/constants';
 
 /**
- * Top问题记录（PRD v6.0）
- * 一个Top问题 = 一个 Tag2 + Tag3 组合
+ * Top问题记录
+ * 一个Top问题 = 一个 tag2 条目
  */
 export interface TopIssue {
-  tag2Name: string;
-  tag3Names: string[];
-  issueKey: string; // tag2Name - tag3Name
-  totalCount: number;
-  periodNewCount: number;
-  a4Count: number;
-  a5Count: number;
-  a6Count: number;
-  largeTenantCount: number;
-  largeTenantRatio: number;
-  avgScore: number;
+  index: string;
+  tag2: string;
   manualPriority: number;
   owner: string;
   resolution: string;
   status: string;
+  iterationPeriod: string;
 }
 
 /**
@@ -53,7 +45,6 @@ interface TagMappings {
  */
 interface IssueGroup {
   tag2: string;
-  tag3: string;
   totalCount: number;
   a4Count: number;
   a5Count: number;
@@ -69,11 +60,6 @@ export class TopIssuesGenerator {
   private storage: StorageAdapter;
   private weights: SortWeights;
   private tagMappings: TagMappings;
-  /** 标签名称到 record_id 的反向映射（用于关联引用写入） */
-  private tagNameToIdMap: {
-    tag2: Map<string, string>;
-    tag3: Map<string, string>;
-  };
 
   constructor(storage?: StorageAdapter) {
     this.storage = storage || getDefaultStorage();
@@ -82,10 +68,6 @@ export class TopIssuesGenerator {
       tag1Map: new Map(),
       tag2Map: new Map(),
       tag3Map: new Map(),
-    };
-    this.tagNameToIdMap = {
-      tag2: new Map(),
-      tag3: new Map(),
     };
   }
 
@@ -115,10 +97,8 @@ export class TopIssuesGenerator {
       const groups = this.aggregateFeedbackData(allFeedbacks);
       console.log(`[Top问题] 共 ${groups.size} 个问题组合`);
 
-      const totalCount = allFeedbacks.length;
-      const issues = this.calculateScores(groups, totalCount);
+      const issues = this.calculateScores(groups);
 
-      issues.sort((a, b) => b.largeTenantCount - a.largeTenantCount);
       const top30 = issues.slice(0, 30);
 
       console.log(`[Top问题] 生成 Top 30 问题`);
@@ -142,7 +122,7 @@ export class TopIssuesGenerator {
 
     const existingMap = new Map<string, BitableRecord>();
     for (const issue of existingIssues) {
-      const key = String(issue.fields[TOP_ISSUES_FIELDS.ISSUE_KEY] || '');
+      const key = String(issue.fields[TOP_ISSUES_FIELDS.TAG2] || '');
       if (key) {
         existingMap.set(key, issue);
       }
@@ -152,49 +132,29 @@ export class TopIssuesGenerator {
     const recordsToUpdate: Array<{ record_id: string; fields: Record<string, unknown> }> = [];
 
     for (const issue of issues) {
-      const existing = existingMap.get(issue.issueKey);
+      const existing = existingMap.get(issue.tag2);
 
       if (existing) {
-        // 已存在的问题：只更新统计字段，不覆盖人工填写的字段
         recordsToUpdate.push({
           record_id: existing.record_id,
           fields: {
-            [TOP_ISSUES_FIELDS.TOTAL_COUNT]: issue.totalCount,
-            [TOP_ISSUES_FIELDS.PERIOD_NEW_COUNT]: issue.periodNewCount,
-            [TOP_ISSUES_FIELDS.A4_COUNT]: issue.a4Count,
-            [TOP_ISSUES_FIELDS.A5_COUNT]: issue.a5Count,
-            [TOP_ISSUES_FIELDS.A6_COUNT]: issue.a6Count,
-            [TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT]: issue.largeTenantCount,
-            [TOP_ISSUES_FIELDS.LARGE_TENANT_RATIO]: issue.largeTenantRatio,
-            [TOP_ISSUES_FIELDS.AVG_SCORE]: issue.avgScore,
-          },
-        });
-      } else {
-        // 新问题：写入关联引用字段（使用 record_id）
-        const tag2RecordId = this.tagNameToIdMap.tag2.get(issue.tag2Name) || '';
-        const tag3RecordIds = issue.tag3Names
-          .map(name => this.tagNameToIdMap.tag3.get(name) || '')
-          .filter(id => id !== '');
-
-        recordsToCreate.push({
-          fields: {
-            // 所属模块：关联引用 Tag2（单选）
-            [TOP_ISSUES_FIELDS.TAG2_NAME]: tag2RecordId ? [tag2RecordId] : [],
-            // 具体问题：关联引用 Tag3（多选）
-            [TOP_ISSUES_FIELDS.TAG3_NAMES]: tag3RecordIds,
-            [TOP_ISSUES_FIELDS.ISSUE_KEY]: issue.issueKey,
-            [TOP_ISSUES_FIELDS.TOTAL_COUNT]: issue.totalCount,
-            [TOP_ISSUES_FIELDS.PERIOD_NEW_COUNT]: issue.periodNewCount,
-            [TOP_ISSUES_FIELDS.A4_COUNT]: issue.a4Count,
-            [TOP_ISSUES_FIELDS.A5_COUNT]: issue.a5Count,
-            [TOP_ISSUES_FIELDS.A6_COUNT]: issue.a6Count,
-            [TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT]: issue.largeTenantCount,
-            [TOP_ISSUES_FIELDS.LARGE_TENANT_RATIO]: issue.largeTenantRatio,
-            [TOP_ISSUES_FIELDS.AVG_SCORE]: issue.avgScore,
             [TOP_ISSUES_FIELDS.MANUAL_PRIORITY]: issue.manualPriority,
             [TOP_ISSUES_FIELDS.OWNER]: issue.owner,
             [TOP_ISSUES_FIELDS.RESOLUTION]: issue.resolution,
             [TOP_ISSUES_FIELDS.STATUS]: issue.status,
+            [TOP_ISSUES_FIELDS.ITERATION_PERIOD]: issue.iterationPeriod,
+          },
+        });
+      } else {
+        recordsToCreate.push({
+          fields: {
+            [TOP_ISSUES_FIELDS.INDEX]: issue.index,
+            [TOP_ISSUES_FIELDS.TAG2]: issue.tag2,
+            [TOP_ISSUES_FIELDS.MANUAL_PRIORITY]: issue.manualPriority,
+            [TOP_ISSUES_FIELDS.OWNER]: issue.owner,
+            [TOP_ISSUES_FIELDS.RESOLUTION]: issue.resolution,
+            [TOP_ISSUES_FIELDS.STATUS]: issue.status,
+            [TOP_ISSUES_FIELDS.ITERATION_PERIOD]: issue.iterationPeriod,
           },
         });
       }
@@ -213,14 +173,14 @@ export class TopIssuesGenerator {
 
   /**
    * 加载标签映射
-   * 从 Tag1/Tag2/Tag3 表读取所有标签，建立 recordId -> name 和 name -> recordId 的双向映射
+   * 从 Tag1/Tag2/Tag3 表读取所有标签，建立 recordId -> name 的映射
    */
   private async loadTagMappings(): Promise<void> {
     const tag1Records = await this.storage.listRecords(TABLES.TAG1, { pageSize: 500 });
     this.tagMappings.tag1Map = new Map();
     for (const record of tag1Records) {
       const recordId = record.record_id;
-      const name = String(record.fields[TAG1_FIELDS.NAME] || '');
+      const name = String(record.fields[TAG1_FIELDS.TAG_NAME] || '');
       if (recordId && name) {
         this.tagMappings.tag1Map.set(recordId, name);
       }
@@ -228,27 +188,21 @@ export class TopIssuesGenerator {
 
     const tag2Records = await this.storage.listRecords(TABLES.TAG2, { pageSize: 500 });
     this.tagMappings.tag2Map = new Map();
-    this.tagNameToIdMap.tag2 = new Map();
     for (const record of tag2Records) {
       const recordId = record.record_id;
-      const name = String(record.fields[TAG2_FIELDS.NAME] || '');
+      const name = String(record.fields[TAG2_FIELDS.TAG_NAME] || '');
       if (recordId && name) {
         this.tagMappings.tag2Map.set(recordId, name);
-        // 建立反向映射（用于关联引用写入）
-        this.tagNameToIdMap.tag2.set(name, recordId);
       }
     }
 
     const tag3Records = await this.storage.listRecords(TABLES.TAG3, { pageSize: 500 });
     this.tagMappings.tag3Map = new Map();
-    this.tagNameToIdMap.tag3 = new Map();
     for (const record of tag3Records) {
       const recordId = record.record_id;
-      const name = String(record.fields[TAG3_FIELDS.NAME] || '');
+      const name = String(record.fields[TAG3_FIELDS.TAG_NAME] || '');
       if (recordId && name) {
         this.tagMappings.tag3Map.set(recordId, name);
-        // 建立反向映射（用于关联引用写入）
-        this.tagNameToIdMap.tag3.set(name, recordId);
       }
     }
   }
@@ -275,13 +229,6 @@ export class TopIssuesGenerator {
   }
 
   /**
-   * 构建问题标识
-   */
-  private buildIssueKey(_tag1: string, tag2: string, tag3: string): string {
-    return `${tag2}||${tag3}`;
-  }
-
-  /**
    * 判断是否为大租户（A4/A5/A6）
    */
   private isLargeTenant(scale: unknown): boolean {
@@ -297,22 +244,18 @@ export class TopIssuesGenerator {
   }
 
   /**
-   * 按 Tag2+Tag3 组合分组统计反馈数据（PRD v6.0）
+   * 按 Tag2 分组统计反馈数据
    */
   private aggregateFeedbackData(feedbacks: BitableRecord[]): Map<string, IssueGroup> {
     const groups = new Map<string, IssueGroup>();
 
     for (const feedback of feedbacks) {
       const tag2 = this.getTagNameFromRecordId(feedback.fields[FEEDBACK_FIELDS.TAG2], 'tag2');
-      const tag3 = this.getTagNameFromRecordId(feedback.fields[FEEDBACK_FIELDS.TAG3], 'tag3');
 
-      const issueKey = this.buildIssueKey('', tag2, tag3);
-
-      let group = groups.get(issueKey);
+      let group = groups.get(tag2);
       if (!group) {
         group = {
           tag2,
-          tag3,
           totalCount: 0,
           a4Count: 0,
           a5Count: 0,
@@ -320,7 +263,7 @@ export class TopIssuesGenerator {
           largeTenantCount: 0,
           totalScore: 0,
         };
-        groups.set(issueKey, group);
+        groups.set(tag2, group);
       }
 
       group.totalCount++;
@@ -343,31 +286,18 @@ export class TopIssuesGenerator {
   /**
    * 计算综合评分
    */
-  private calculateScores(groups: Map<string, IssueGroup>, totalFeedbackCount: number): TopIssue[] {
+  private calculateScores(groups: Map<string, IssueGroup>): TopIssue[] {
     const issues: TopIssue[] = [];
 
-    Array.from(groups.entries()).forEach(([issueKey, group]) => {
-      const avgScore = group.totalCount > 0 ? group.totalScore / group.totalCount : 0;
-
-      const largeTenantCount = group.a4Count + group.a5Count + group.a6Count;
-      const largeTenantRatio = group.totalCount > 0 ? largeTenantCount / group.totalCount : 0;
-
+    Array.from(groups.entries()).forEach(([_, group]) => {
       issues.push({
-        tag2Name: group.tag2,
-        tag3Names: [group.tag3],
-        issueKey: `${group.tag2} - ${group.tag3}`,
-        totalCount: group.totalCount,
-        periodNewCount: 0,
-        a4Count: group.a4Count,
-        a5Count: group.a5Count,
-        a6Count: group.a6Count,
-        largeTenantCount,
-        largeTenantRatio: Math.round(largeTenantRatio * 100) / 100,
-        avgScore: Math.round(avgScore * 100) / 100,
+        index: '',
+        tag2: group.tag2,
         manualPriority: 0,
         owner: '',
         resolution: '',
         status: '待讨论',
+        iterationPeriod: '待定',
       });
     });
 
