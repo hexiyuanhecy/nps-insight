@@ -1,46 +1,63 @@
 /**
- * Vercel KV 存储适配器
+ * Upstash Redis 存储适配器
  * 用于缓存配置和用户映射关系
+ *
+ * 支持两种模式：
+ * 1. 生产环境：使用 Upstash Redis（需要配置 KV_REST_API_URL 和 KV_REST_API_TOKEN）
+ * 2. 开发环境：无 Redis 时使用内存缓存作为 fallback
  */
+
+import { Redis } from '@upstash/redis';
 
 // ponytail: Config 类型与 route.ts 中的 StoredConfig 保持一致
 // 使用 Record 避免循环依赖
 type Config = Record<string, unknown>;
 
-// KV 客户端（延迟初始化）
-// 使用 any 类型：第三方 @vercel/kv 类型在未安装时不可用
-// eslint-disable-next-line
-let kvClient: any = null;
+// Redis 客户端（延迟初始化）
+let redisClient: Redis | null = null;
 
-// 内存降级缓存 — 存储 JSON 字符串
+// 内存降级缓存 — 存储 JSON 字符串（仅开发环境使用）
 const memoryCache = new Map<string, string>();
 
 /**
- * 获取 KV 客户端，带降级处理
+ * 获取 Redis 客户端
+ * 仅在环境变量配置时才初始化
  */
-async function getKvClient() {
-  if (kvClient !== null) return kvClient;
+function getRedisClient(): Redis | null {
+  // 已初始化直接返回
+  if (redisClient) return redisClient;
 
-  // 先检查环境变量是否配置，未配置则直接降级到内存缓存
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
-    console.warn('[KV] KV 环境变量未配置，使用内存缓存降级');
-    kvClient = null;
+  // 检查环境变量
+  const url = process.env.KV_REST_API_URL;
+  const token = process.env.KV_REST_API_TOKEN;
+
+  if (!url || !token) {
     return null;
   }
 
   try {
-    // @ts-ignore - @vercel/kv 为可选依赖，未安装时自动降级到内存缓存
-    const { createClient } = await import('@vercel/kv');
-    kvClient = createClient({
-      url: process.env.KV_REST_API_URL,
-      token: process.env.KV_REST_API_TOKEN,
+    redisClient = new Redis({
+      url,
+      token,
     });
-    return kvClient;
+    return redisClient;
   } catch {
-    // KV 不可用，使用内存缓存
-    kvClient = null;
     return null;
   }
+}
+
+/**
+ * 检查 Redis 是否可用
+ */
+function isRedisAvailable(): boolean {
+  return getRedisClient() !== null;
+}
+
+/**
+ * 检查是否为开发环境
+ */
+function isDevelopment(): boolean {
+  return process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
 }
 
 // ==================== 配置操作 ====================
@@ -49,8 +66,10 @@ async function getKvClient() {
  * 获取配置
  */
 export async function getConfig(ownerUserId: string): Promise<Config | null> {
-  const client = await getKvClient();
+  const client = getRedisClient();
+
   if (!client) {
+    // 使用内存缓存
     const raw = memoryCache.get(`config:${ownerUserId}`);
     if (!raw) return null;
     try {
@@ -62,8 +81,14 @@ export async function getConfig(ownerUserId: string): Promise<Config | null> {
 
   try {
     const result = await client.get(`config:${ownerUserId}`);
-    return (result as Config | null) ?? null;
+    if (!result) return null;
+    // Upstash Redis 返回的结果可能是字符串或对象
+    if (typeof result === 'string') {
+      return JSON.parse(result) as Config;
+    }
+    return result as Config;
   } catch {
+    // 连接失败，降级到内存
     const raw = memoryCache.get(`config:${ownerUserId}`);
     if (!raw) return null;
     try {
@@ -78,7 +103,7 @@ export async function getConfig(ownerUserId: string): Promise<Config | null> {
  * 保存配置
  */
 export async function setConfig(ownerUserId: string, config: Config): Promise<boolean> {
-  const client = await getKvClient();
+  const client = getRedisClient();
   const key = `config:${ownerUserId}`;
 
   if (!client) {
@@ -87,7 +112,7 @@ export async function setConfig(ownerUserId: string, config: Config): Promise<bo
   }
 
   try {
-    await client.set(key, config);
+    await client.set(key, JSON.stringify(config));
     return true;
   } catch {
     // 降级到内存缓存
@@ -102,7 +127,8 @@ export async function setConfig(ownerUserId: string, config: Config): Promise<bo
  * 获取用户到 Owner 的映射
  */
 export async function getUserMapping(userId: string): Promise<string | null> {
-  const client = await getKvClient();
+  const client = getRedisClient();
+
   if (!client) {
     return memoryCache.get(`userConfigMapping:${userId}`) ?? null;
   }
@@ -119,7 +145,7 @@ export async function getUserMapping(userId: string): Promise<string | null> {
  * 设置用户映射
  */
 export async function setUserMapping(userId: string, ownerUserId: string): Promise<boolean> {
-  const client = await getKvClient();
+  const client = getRedisClient();
   const key = `userConfigMapping:${userId}`;
 
   if (!client) {
@@ -140,7 +166,7 @@ export async function setUserMapping(userId: string, ownerUserId: string): Promi
  * 删除用户映射
  */
 export async function deleteUserMapping(userId: string): Promise<boolean> {
-  const client = await getKvClient();
+  const client = getRedisClient();
   const key = `userConfigMapping:${userId}`;
 
   if (!client) {
@@ -163,19 +189,23 @@ export async function deleteUserMapping(userId: string): Promise<boolean> {
  * 列出所有 config:* 键
  */
 export async function listAllConfigKeys(): Promise<string[]> {
-  const client = await getKvClient();
+  const client = getRedisClient();
+
   if (!client) {
     return Array.from(memoryCache.keys()).filter((k) => k.startsWith('config:'));
   }
 
   try {
     const keys: string[] = [];
-    // ponytail: 使用 scan 而非 keys()，避免阻塞
-    let cursor = 0;
+    let cursor: number | string = 0;
     do {
-      const [nextCursor, batch] = await client.scan({ cursor, match: 'config:*', count: 100 });
-      cursor = nextCursor;
-      keys.push(...batch);
+      // @ts-ignore - Upstash scan API 类型定义复杂，使用简化调用
+      const result = await client.scan(cursor, { match: 'config:*', count: 100 });
+      cursor = typeof result[0] === 'number' ? result[0] : parseInt(String(result[0]), 10);
+      const batch = result[1] as string[];
+      if (batch && batch.length > 0) {
+        keys.push(...batch);
+      }
     } while (cursor !== 0);
     return keys;
   } catch {
@@ -187,18 +217,23 @@ export async function listAllConfigKeys(): Promise<string[]> {
  * 列出所有 userConfigMapping:* 键
  */
 export async function listAllMappingKeys(): Promise<string[]> {
-  const client = await getKvClient();
+  const client = getRedisClient();
+
   if (!client) {
     return Array.from(memoryCache.keys()).filter((k) => k.startsWith('userConfigMapping:'));
   }
 
   try {
     const keys: string[] = [];
-    let cursor = 0;
+    let cursor: number | string = 0;
     do {
-      const [nextCursor, batch] = await client.scan({ cursor, match: 'userConfigMapping:*', count: 100 });
-      cursor = nextCursor;
-      keys.push(...batch);
+      // @ts-ignore - Upstash scan API 类型定义复杂，使用简化调用
+      const result = await client.scan(cursor, { match: 'userConfigMapping:*', count: 100 });
+      cursor = typeof result[0] === 'number' ? result[0] : parseInt(String(result[0]), 10);
+      const batch = result[1] as string[];
+      if (batch && batch.length > 0) {
+        keys.push(...batch);
+      }
     } while (cursor !== 0);
     return keys;
   } catch {
@@ -217,7 +252,8 @@ const MIGRATION_FLAG_KEY = 'system:migration_completed';
  * 检查数据迁移是否已完成
  */
 async function isMigrationCompleted(): Promise<boolean> {
-  const client = await getKvClient();
+  const client = getRedisClient();
+
   if (!client) {
     return memoryCache.has(MIGRATION_FLAG_KEY);
   }
@@ -234,7 +270,7 @@ async function isMigrationCompleted(): Promise<boolean> {
  * 标记迁移已完成
  */
 async function setMigrationCompleted(): Promise<void> {
-  const client = await getKvClient();
+  const client = getRedisClient();
   const key = MIGRATION_FLAG_KEY;
 
   if (!client) {
@@ -251,7 +287,7 @@ async function setMigrationCompleted(): Promise<void> {
 
 /**
  * 从环境变量构建默认配置
- * 仅当 KV 中没有配置时用于初始化
+ * 仅当 Redis 中没有配置时用于初始化
  */
 function buildDefaultConfigFromEnv(): Config {
   return {
@@ -264,7 +300,7 @@ function buildDefaultConfigFromEnv(): Config {
     bitable: {
       mode: process.env.BITABLE_MODE || 'idle',
       appToken: process.env.FEISHU_BITABLE_APP_TOKEN || '',
-      url: process.env.FEISHU_BITABLE_URL || '',
+      url: process.env.BITABLE_URL || '',
       status: process.env.FEISHU_BITABLE_APP_TOKEN ? 'linked' : 'unset',
     },
     dataSource: {
@@ -316,7 +352,7 @@ function buildDefaultConfigFromEnv(): Config {
 }
 
 /**
- * 执行数据迁移（从 .env 到 KV）
+ * 执行数据迁移（从 .env 到 Redis）
  * 幂等操作：首次调用会迁移配置，之后调用无效
  *
  * @returns 是否执行了迁移（true=首次迁移，false=已迁移或跳过）
@@ -328,10 +364,10 @@ export async function migrateFromEnvToKV(): Promise<boolean> {
     return false;
   }
 
-  // 2. 检查 KV 中是否已有配置
+  // 2. 检查 Redis 中是否已有配置
   const existingKeys = await listAllConfigKeys();
   if (existingKeys.length > 0) {
-    console.log(`[迁移] KV 中已有 ${existingKeys.length} 个配置，跳过迁移`);
+    console.log(`[迁移] Redis 中已有 ${existingKeys.length} 个配置，跳过迁移`);
     await setMigrationCompleted();
     return false;
   }
@@ -340,10 +376,11 @@ export async function migrateFromEnvToKV(): Promise<boolean> {
   const defaultConfig = buildDefaultConfigFromEnv();
   const ownerId = defaultConfig.ownerUserId as string;
 
-  console.log('[迁移] 开始从 .env 迁移配置到 KV');
+  console.log('[迁移] 开始从 .env 迁移配置到 Redis');
   console.log(`[迁移] Owner ID: ${ownerId}`);
+  console.log(`[迁移] Redis 可用: ${isRedisAvailable()}`);
 
-  // 4. 保存配置到 KV
+  // 4. 保存配置到 Redis
   await setConfig(ownerId, defaultConfig);
 
   // 5. 创建用户映射（owner → self）
@@ -354,4 +391,12 @@ export async function migrateFromEnvToKV(): Promise<boolean> {
 
   console.log('[迁移] 配置迁移完成');
   return true;
+}
+
+// 导出存储状态供调试
+export function getStorageStatus(): { redis: boolean; memory: number } {
+  return {
+    redis: isRedisAvailable(),
+    memory: memoryCache.size,
+  };
 }
