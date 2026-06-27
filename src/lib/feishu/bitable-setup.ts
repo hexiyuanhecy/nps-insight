@@ -6,11 +6,48 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getTenantAccessToken } from './client';
+import { refreshAccessToken } from './user-auth';
+import { getCurrentTimestampSeconds } from '@/constants/app-constants';
 
 const BITABLE_API_BASE = 'https://open.feishu.cn/open-apis/bitable/v1';
 
 const REQUEST_DELAY_MS = 300;
 const MAX_RETRIES = 3;
+
+/**
+ * 获取有效的 access_token
+ * 如果传入了 userAccessToken，优先使用（支持自动刷新）
+ * 否则使用 tenant_access_token
+ */
+async function getAccessToken(
+  userAccessToken?: string,
+  refreshToken?: string,
+  expiresAt?: number
+): Promise<string> {
+  if (userAccessToken) {
+    // 如果有 refreshToken 且 token 即将过期，先刷新
+    if (refreshToken && expiresAt) {
+      const now = getCurrentTimestampSeconds();
+      const remainingSeconds = expiresAt - now;
+
+      if (remainingSeconds < 600) {
+        console.log('[多维表格] 用户 token 即将过期，先刷新...');
+        try {
+          const newToken = await refreshAccessToken(refreshToken);
+          console.log('[多维表格] 用户 token 刷新成功');
+          return newToken.access_token;
+        } catch (refreshErr) {
+          console.warn('[多维表格] 用户 token 刷新失败，使用现有 token:', refreshErr instanceof Error ? refreshErr.message : '未知错误');
+          return userAccessToken;
+        }
+      }
+    }
+    return userAccessToken;
+  }
+
+  // 使用应用身份
+  return getTenantAccessToken();
+}
 
 export const TENANT_SCALE_OPTIONS = [
   { name: 'A1', color: 0 },
@@ -228,12 +265,16 @@ async function feishuRequest(
   throw new Error(`请求重试次数超限: ${url}`);
 }
 
-async function createBitableApp(token: string, name: string): Promise<string> {
+async function createBitableApp(token: string, name: string, folderToken?: string): Promise<string> {
+  const body: Record<string, string> = { name };
+  if (folderToken) {
+    body.folder_token = folderToken;
+  }
   const data = await feishuRequest(
     `${BITABLE_API_BASE}/apps`,
     {
       method: 'POST',
-      body: JSON.stringify({ name, folder_token: '' }),
+      body: JSON.stringify(body),
     },
     token
   );
@@ -451,9 +492,14 @@ function replaceFieldIdsInFormula(formula: string, fieldIdMap: Record<string, st
 }
 
 export async function createNPSInsightBitable(
-  name?: string
+  name?: string,
+  folderToken?: string,
+  userAccessToken?: string,
+  refreshToken?: string,
+  expiresAt?: number
 ): Promise<BitableInfo> {
-  const token = await getTenantAccessToken();
+  const token = await getAccessToken(userAccessToken, refreshToken, expiresAt);
+  console.log('[多维表格] 使用身份:', userAccessToken ? '用户身份' : '应用身份');
   const metadata = loadMetadata();
   validateMetadata(metadata);
 
@@ -469,7 +515,12 @@ export async function createNPSInsightBitable(
     const appName = name || defaultName;
 
     console.log('[阶段2] 创建全新空白多维表格...');
-    newAppToken = await createBitableApp(token, appName);
+    if (folderToken) {
+      console.log(`[阶段2] 创建位置: 指定文件夹 ${folderToken}`);
+    } else {
+      console.log('[阶段2] 创建位置: 云盘根目录');
+    }
+    newAppToken = await createBitableApp(token, appName, folderToken);
     console.log(`[阶段2] 多维表格创建成功，appToken: ${newAppToken}`);
     await sleep(REQUEST_DELAY_MS);
 
@@ -534,7 +585,9 @@ export async function createNPSInsightBitable(
             field_name: sourceField.field_name,
             type: 1,
           };
-          await createField(token, newAppToken, newTableId, placeholderPayload);
+          const newFieldId = await createField(token, newAppToken, newTableId, placeholderPayload);
+          // 记录字段ID映射，确保公式中引用的Lookup字段能正确替换
+          fieldIdMap[sourceField.field_id] = newFieldId;
 
           lookupFieldList.push({
             old_table_id: oldTableId,
@@ -729,9 +782,12 @@ export async function createNPSInsightBitable(
 }
 
 export async function verifyBitableStructure(
-  appToken: string
+  appToken: string,
+  userAccessToken?: string,
+  refreshToken?: string,
+  expiresAt?: number
 ): Promise<{ valid: boolean; issues: string[] }> {
-  const token = await getTenantAccessToken();
+  const token = await getAccessToken(userAccessToken, refreshToken, expiresAt);
   const metadata = loadMetadata();
   const issues: string[] = [];
 

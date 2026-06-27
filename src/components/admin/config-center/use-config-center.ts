@@ -15,12 +15,21 @@ import { DEFAULT_TAG1, POPULAR_MODELS, createDefaultConfig } from '@/constants/c
 
 export function useConfigCenter() {
   const [activeTab, setActiveTab] = useState<ConfigTabKey>('feishu');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isEditing, setIsEditing] = useState(false); // 全局编辑模式状态
+  const [tabLoading, setTabLoadingState] = useState<Record<ConfigTabKey, boolean>>({
+    feishu: false,
+    datasource: false,
+    tagging: false,
+  });
   const [bitableCreateOpen, setBitableCreateOpen] = useState(false);
   const [bitableLinkOpen, setBitableLinkOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [config, setConfig] = useState<TabConfig | null>(null);
   const [aiCache, setAiCache] = useState<Record<string, AiProviderCache>>({});
+  const [isSaving, setIsSaving] = useState(false); // 全局保存 loading 状态
+  const [isWeeklyTagging, setIsWeeklyTagging] = useState(false); // 周打标独立 loading
+  const [isMonthlyAnalysis, setIsMonthlyAnalysis] = useState(false); // 月分析独立 loading
 
   const pushToast = useCallback((text: string, type: ToastType = 'success') => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
@@ -32,9 +41,13 @@ export function useConfigCenter() {
     setToasts((ts) => ts.filter((t) => t.id !== id));
   }, []);
 
+  const setTabLoading = useCallback((tab: ConfigTabKey, loading: boolean) => {
+    setTabLoadingState((prev) => ({ ...prev, [tab]: loading }));
+  }, []);
+
   const loadConfig = useCallback(async () => {
     try {
-      setIsLoading(true);
+      setIsInitialLoading(true);
       const result = await fetchConfig();
       if (result.success && result.data) {
         const data = result.data;
@@ -71,7 +84,7 @@ export function useConfigCenter() {
     } catch (error) {
       pushToast('加载配置失败: ' + (error instanceof Error ? error.message : '未知错误'), 'error');
     } finally {
-      setIsLoading(false);
+      setIsInitialLoading(false);
     }
   }, [pushToast]);
 
@@ -83,7 +96,10 @@ export function useConfigCenter() {
   const actions = useConfigActions({
     config,
     setConfig,
-    setIsLoading,
+    setTabLoading,
+    setIsSaving,
+    setIsWeeklyTagging,
+    setIsMonthlyAnalysis,
     pushToast,
     loadConfig,
     setBitableCreateOpen,
@@ -100,7 +116,14 @@ export function useConfigCenter() {
   return {
     activeTab,
     setActiveTab,
-    isLoading,
+    isInitialLoading,
+    tabLoading,
+    setTabLoading,
+    isEditing,
+    setIsEditing,
+    isSaving,
+    isWeeklyTagging,
+    isMonthlyAnalysis,
     bitableCreateOpen,
     setBitableCreateOpen,
     bitableLinkOpen,

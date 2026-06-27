@@ -20,8 +20,11 @@ export interface DocumentAdapter {
 
   /**
    * 创建文档
+   * @param title 文档标题
+   * @param content 文档内容
+   * @param folderToken 可选，文件夹token，指定创建位置
    */
-  create(title: string, content: string): Promise<{ documentId: string; url: string }>;
+  create(title: string, content: string, folderToken?: string): Promise<{ documentId: string; url: string }>;
 
   /**
    * 追加内容到文档

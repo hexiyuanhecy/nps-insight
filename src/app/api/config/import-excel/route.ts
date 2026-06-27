@@ -9,6 +9,7 @@ import { ExcelAdapter } from '@/lib/data-sources/excel-adapter';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
 import type { FeedbackRecord } from '@/lib/data-sources/base-adapter';
+import { DEFAULT_PAGE_SIZE } from '@/constants/app-constants';
 
 export async function POST(request: NextRequest) {
   try {
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
     // 6. 查询已存在的反馈 ID（用于去重）
     // 使用分页查询获取所有记录
     const allExistingRecords = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
-      pageSize: 500,
+      pageSize: DEFAULT_PAGE_SIZE,
     });
 
     // 如果记录数超过 500，继续查询（listRecords 内部会自动分页）

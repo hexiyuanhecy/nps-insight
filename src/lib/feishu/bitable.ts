@@ -12,6 +12,10 @@ let configCache: Record<string, string> | null = null;
 let configCacheTime = 0;
 const CONFIG_CACHE_TTL = 60000; // 缓存 60 秒
 
+// appToken 缓存（支持多用户）
+let appTokenCache: string | null = null;
+let appTokenCacheOwner: string | null = null;
+
 /** 从环境变量构建表映射 */
 function buildEnvMapping(): Record<string, string> {
   return {
@@ -25,10 +29,16 @@ function buildEnvMapping(): Record<string, string> {
   };
 }
 
-/** 从 KV 获取配置并缓存（优先使用环境变量，KV 作为补充） */
-async function getConfigFromKV(): Promise<Record<string, string>> {
+/** 从 KV 获取配置并缓存（优先使用环境变量，KV 作为补充）
+ * @param ownerId 用户标识，不传则使用 'default_owner'
+ * @param forceRefresh 是否强制刷新缓存
+ */
+async function getConfigFromKV(ownerId?: string, forceRefresh?: boolean): Promise<Record<string, string>> {
+  const resolvedOwnerId = ownerId || 'default_owner';
   const now = Date.now();
-  if (configCache && now - configCacheTime < CONFIG_CACHE_TTL) {
+
+  // 检查缓存是否有效（针对同一用户）
+  if (!forceRefresh && configCache && now - configCacheTime < CONFIG_CACHE_TTL && appTokenCacheOwner === resolvedOwnerId) {
     return configCache;
   }
 
@@ -39,7 +49,7 @@ async function getConfigFromKV(): Promise<Record<string, string>> {
   try {
     const kvPromise = (async () => {
       const { getConfig } = await import('@/lib/storage/kv-storage');
-      const config = await getConfig('default_owner');
+      const config = await getConfig(resolvedOwnerId);
       return config;
     })();
 
@@ -59,16 +69,19 @@ async function getConfigFromKV(): Promise<Record<string, string>> {
         tenants: bitable.tenantsTableId || '',
         analysis: bitable.analysisTableId || '',
       };
-      // 合并：环境变量优先，KV 补充空值
-      const merged: Record<string, string> = { ...kvMapping };
-      for (const [key, value] of Object.entries(envMapping)) {
-        if (value && !merged[key]) {
+      // 合并：KV 优先（因为多用户配置存在 KV），环境变量作为回退
+      const merged: Record<string, string> = { ...envMapping };
+      for (const [key, value] of Object.entries(kvMapping)) {
+        if (value) {
           merged[key] = value;
         }
       }
       configCache = merged;
       configCacheTime = now;
-      console.log('[Bitable] 配置已加载（环境变量+KV）:', configCache);
+      appTokenCache = bitable.appToken || envMapping.appToken || null;
+      appTokenCacheOwner = resolvedOwnerId;
+      console.log(`[Bitable] 配置已加载（KV 用户: ${resolvedOwnerId}）:`, configCache);
+      console.log(`[Bitable] AppToken: ${appTokenCache ? appTokenCache.substring(0, 8) + '...' : '(空)'}`);
       return configCache;
     }
   } catch (e) {
@@ -78,6 +91,8 @@ async function getConfigFromKV(): Promise<Record<string, string>> {
   // KV 不可用，使用环境变量
   configCache = envMapping;
   configCacheTime = now;
+  appTokenCache = process.env.BITABLE_TOKEN || null;
+  appTokenCacheOwner = resolvedOwnerId;
   console.log('[Bitable] 配置已加载（仅环境变量）:', configCache);
   return configCache;
 }
@@ -162,11 +177,16 @@ async function getTableIdMappingAsync(): Promise<Record<string, string>> {
   };
 }
 
-/** 获取多维表格Token */
+/** 获取多维表格Token（支持从缓存获取，支持多用户） */
 function getBitableToken(): string {
+  // 优先从缓存获取（多用户场景）
+  if (appTokenCache) {
+    return appTokenCache;
+  }
+  // 回退到环境变量
   const token = process.env.BITABLE_TOKEN;
   if (!token) {
-    throw new Error('多维表格Token未配置，请设置环境变量 BITABLE_TOKEN');
+    throw new Error('多维表格Token未配置，请先在配置中心绑定多维表格');
   }
   return token;
 }
@@ -249,10 +269,13 @@ export function resolveTableId(tableName: string): string {
   return tableName;
 }
 
-/** 初始化配置（从 KV 加载，可在应用启动时调用） */
-export async function initializeBitableConfig(): Promise<void> {
-  // 1. 加载 KV 配置
-  await getConfigFromKV();
+/** 初始化配置（从 KV 加载，可在应用启动时调用）
+ * @param ownerId 用户标识，不传则使用 'default_owner'
+ * @param forceRefresh 是否强制刷新缓存
+ */
+export async function initializeBitableConfig(ownerId?: string, forceRefresh?: boolean): Promise<void> {
+  // 1. 加载 KV 配置（强制刷新确保多用户场景加载正确配置）
+  await getConfigFromKV(ownerId, forceRefresh);
 
   // 2. 预加载动态表名映射
   try {

@@ -5,6 +5,8 @@
 
 import { DocumentAdapter } from './base-document';
 import { getTenantAccessToken } from '../feishu/client';
+import { refreshAccessToken } from '../feishu/user-auth';
+import { getCurrentTimestampSeconds } from '@/constants/app-constants';
 
 const DOCX_API_BASE = 'https://open.feishu.cn/open-apis/docx/v1';
 
@@ -14,14 +16,58 @@ const DOCX_API_BASE = 'https://open.feishu.cn/open-apis/docx/v1';
 export class FeishuDocumentAdapter implements DocumentAdapter {
   private appId: string;
   private appSecret: string;
+  private userAccessToken?: string;
+  private userRefreshToken?: string;
+  private tokenExpiresAt?: number;
 
-  constructor(appId?: string, appSecret?: string) {
+  constructor(appId?: string, appSecret?: string, userAccessToken?: string, userRefreshToken?: string, tokenExpiresAt?: number) {
     this.appId = appId || process.env.FEISHU_APP_ID || '';
     this.appSecret = appSecret || process.env.FEISHU_APP_SECRET || '';
-    
+    this.userAccessToken = userAccessToken;
+    this.userRefreshToken = userRefreshToken;
+    this.tokenExpiresAt = tokenExpiresAt;
+
     if (!this.appId || !this.appSecret) {
       throw new Error('飞书应用配置缺失');
     }
+  }
+
+  /**
+   * 获取有效的 access_token
+   * 如果配置了用户 token，优先使用用户身份（支持自动刷新）
+   * 否则使用应用身份 tenant_access_token
+   */
+  private async getAccessToken(): Promise<string> {
+    if (this.userAccessToken) {
+      // 如果有 refreshToken 且 token 即将过期，先刷新
+      if (this.userRefreshToken && this.tokenExpiresAt) {
+        const now = getCurrentTimestampSeconds();
+        const remainingSeconds = this.tokenExpiresAt - now;
+
+        if (remainingSeconds < 600) {
+          console.log('[飞书文档] 用户 token 即将过期，先刷新...');
+          try {
+            const newToken = await refreshAccessToken(this.userRefreshToken);
+            console.log('[飞书文档] 用户 token 刷新成功');
+            this.userAccessToken = newToken.access_token;
+            if (newToken.refresh_token) {
+              this.userRefreshToken = newToken.refresh_token;
+            }
+            if (newToken.expires_in) {
+              this.tokenExpiresAt = getCurrentTimestampSeconds() + newToken.expires_in;
+            }
+            return newToken.access_token;
+          } catch (refreshErr) {
+            console.warn('[飞书文档] 用户 token 刷新失败，使用现有 token:', refreshErr instanceof Error ? refreshErr.message : '未知错误');
+            return this.userAccessToken;
+          }
+        }
+      }
+      return this.userAccessToken;
+    }
+
+    // 使用应用身份
+    return getTenantAccessToken();
   }
 
   /**
@@ -36,7 +82,7 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
    */
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      const token = await getTenantAccessToken();
+      const token = await this.getAccessToken();
       if (!token) {
         return { success: false, message: '获取飞书 Token 失败' };
       }
@@ -48,9 +94,23 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
 
   /**
    * 创建文档
+   * @param title 文档标题
+   * @param content 文档内容
+   * @param folderToken 可选，文件夹token，指定创建位置
    */
-  async create(title: string, content: string): Promise<{ documentId: string; url: string }> {
-    const token = await getTenantAccessToken();
+  async create(title: string, content: string, folderToken?: string): Promise<{ documentId: string; url: string }> {
+    const token = await this.getAccessToken();
+    
+    console.log(`[飞书文档] 创建文档: ${title}`);
+    if (folderToken) {
+      console.log(`[飞书文档] 创建位置: 文件夹 ${folderToken}`);
+    }
+    
+    // 构建请求体
+    const body: Record<string, any> = { title };
+    if (folderToken) {
+      body.folder_token = folderToken;
+    }
     
     // 创建文档
     const createResponse = await fetch(`${DOCX_API_BASE}/documents`, {
@@ -59,7 +119,7 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(body),
     });
     
     const createData = await createResponse.json();
@@ -75,6 +135,7 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
     }
     
     const url = `https://feishu.cn/docx/${documentId}`;
+    console.log(`[飞书文档] 创建成功: ${url}`);
     return { documentId, url };
   }
 
@@ -86,7 +147,7 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
     content: string,
     position: 'top' | 'bottom' = 'top'
   ): Promise<void> {
-    const token = await getTenantAccessToken();
+    const token = await this.getAccessToken();
     
     // 将 Markdown 转换为飞书文档 Block
     const blocks = this.parseMarkdownToBlocks(content);
@@ -119,7 +180,7 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
    * 更新文档内容
    */
   async update(documentId: string, content: string): Promise<void> {
-    const token = await getTenantAccessToken();
+    const token = await this.getAccessToken();
     
     // 获取文档根 Block
     const blocks = this.parseMarkdownToBlocks(content);
@@ -150,7 +211,7 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
    * 获取文档内容
    */
   async getContent(documentId: string): Promise<string> {
-    const token = await getTenantAccessToken();
+    const token = await this.getAccessToken();
     
     const response = await fetch(
       `${DOCX_API_BASE}/documents/${documentId}/blocks/${documentId}/children`,
@@ -175,7 +236,7 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
    * 删除文档
    */
   async delete(documentId: string): Promise<void> {
-    const token = await getTenantAccessToken();
+    const token = await this.getAccessToken();
     
     const response = await fetch(`${DOCX_API_BASE}/documents/${documentId}`, {
       method: 'DELETE',

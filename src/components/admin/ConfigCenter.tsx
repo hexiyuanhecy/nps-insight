@@ -1,6 +1,7 @@
 /**
- * 配置中心组件 v5
+ * 配置中心组件 v6
  * 三个 Tab：飞书配置 / 数据源 / 打标与分析配置
+ * 右上角有编辑/保存按钮和周打标/月分析按钮
  */
 
 'use client';
@@ -9,6 +10,7 @@ import { Database, Loader2, Settings, Sparkles } from 'lucide-react';
 import { DatasourceTab } from '@/components/admin/config-center/DatasourceTab';
 import { FeishuTab } from '@/components/admin/config-center/FeishuTab';
 import { TaggingTab } from '@/components/admin/config-center/TaggingTab';
+import { TopActionButtons } from '@/components/admin/config-center/TopActionButtons';
 import { useConfigCenter } from '@/components/admin/config-center/use-config-center';
 import { ToastStack } from '@/components/admin/config-center/ui';
 import type { ConfigTabKey } from '@/components/admin/config-center/types';
@@ -37,6 +39,21 @@ export default function ConfigCenter() {
   return (
     <div className="space-y-6">
       <ToastStack toasts={ctrl.toasts} onDismiss={ctrl.dismissToast} />
+
+      {/* 页面标题栏 + 右上角操作按钮 */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold text-slate-900">配置中心</h1>
+        <TopActionButtons
+          isEditing={ctrl.isEditing}
+          onEdit={() => ctrl.setIsEditing(true)}
+          onSave={() => ctrl.saveAll()}
+          onWeeklyTagging={ctrl.runWeeklyTagging}
+          onMonthlyAnalysis={ctrl.runMonthlyAnalysis}
+          isSaving={ctrl.isSaving}
+          isWeeklyTagging={ctrl.isWeeklyTagging}
+          isMonthlyAnalysis={ctrl.isMonthlyAnalysis}
+        />
+      </div>
 
       {/* Tab 导航 */}
       <div className="flex gap-1 border-b border-slate-200 bg-white p-1 rounded-lg overflow-x-auto">

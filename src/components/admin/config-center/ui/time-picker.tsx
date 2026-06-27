@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-export function TimePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function TimePicker({ value, onChange, disabled = false }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
   const [isOpen, setIsOpen] = useState(false);
   const [tempHour, setTempHour] = useState(parseInt(value?.split(':')[0], 10) || 10);
   const [tempMinute, setTempMinute] = useState(parseInt(value?.split(':')[1], 10) || 0);
@@ -18,15 +18,16 @@ export function TimePicker({ value, onChange }: { value: string; onChange: (v: s
   return (
     <div className="relative">
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 transition-colors"
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        disabled={disabled}
+        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 transition-colors disabled:bg-slate-50 disabled:text-slate-500"
       >
         {value || '10:00'}
       </button>
       {isOpen && (
         <div className="absolute z-50 mt-1 w-48 rounded-lg border border-slate-200 bg-white shadow-lg">
           <div className="p-2">
-            <label className="block text-xs font-medium text-slate-600 mb-1">小时</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600">小时</label>
             <div className="grid grid-cols-6 gap-1">
               {hours.map((h) => (
                 <button
@@ -40,7 +41,7 @@ export function TimePicker({ value, onChange }: { value: string; onChange: (v: s
             </div>
           </div>
           <div className="border-t border-slate-100 p-2">
-            <label className="block text-xs font-medium text-slate-600 mb-1">分钟</label>
+            <label className="mb-1 block text-xs font-medium text-slate-600">分钟</label>
             <div className="grid grid-cols-4 gap-1">
               {minutes.map((m) => (
                 <button

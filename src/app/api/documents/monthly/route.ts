@@ -11,6 +11,8 @@ import { getDefaultDocument, getDefaultNotification, getDefaultStorage } from '@
 import { TagEvolution } from '@/lib/ai/tag-evolution';
 import { TopIssuesGenerator } from '@/lib/analysis/top-issues';
 import { FormulaSync } from '@/lib/analysis/formula-sync';
+import { createUserResourceStore } from '@/lib/storage/user-resource-store';
+import { DEFAULT_PAGE_SIZE } from '@/constants/app-constants';
 
 /**
  * 生成月报
@@ -46,7 +48,7 @@ async function generateMonthlyReport(year?: number, month?: number): Promise<{
 
   try {
     // 获取该月的所有反馈
-    const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, { pageSize: 500 });
+    const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, { pageSize: DEFAULT_PAGE_SIZE });
 
     const monthFeedbacks = records.filter((r) => {
       const createTime = extractFieldValue(r.fields[FEEDBACK_FIELDS.CREATE_TIME]);
@@ -121,6 +123,18 @@ async function generateMonthlyReport(year?: number, month?: number): Promise<{
     let documentUrl: string | undefined;
     try {
       const document = getDefaultDocument();
+      
+      // 从用户资源中读取月报汇总文件夹token
+      const userResourceStore = createUserResourceStore();
+      const userResource = await userResourceStore.get();
+      const monthFolderToken = userResource?.monthFolderToken;
+      
+      if (monthFolderToken) {
+        console.log('[月报] 使用月报汇总文件夹:', monthFolderToken);
+      } else {
+        console.warn('[月报] 未配置月报汇总文件夹，将创建在默认位置');
+      }
+      
       const docContent = generateMonthlyDocContent({
         periodName,
         startDate: startDate.toISOString(),
@@ -134,7 +148,7 @@ async function generateMonthlyReport(year?: number, month?: number): Promise<{
         topIssues,
       });
 
-      const doc = await document.create(`${periodName}月度分析报告`, docContent);
+      const doc = await document.create(`${periodName}月度分析报告`, docContent, monthFolderToken);
       documentUrl = doc.url;
     } catch (docError) {
       console.error('[月报] 生成文档失败', docError);
@@ -297,7 +311,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 返回月报列表
-    const records = await bitableClient.listRecords(TABLES.TOP_ISSUES, { pageSize: 500 });
+    const records = await bitableClient.listRecords(TABLES.TOP_ISSUES, { pageSize: DEFAULT_PAGE_SIZE });
 
     const monthlyReports = records
       .filter((r) => {

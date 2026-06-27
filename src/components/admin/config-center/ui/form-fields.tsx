@@ -10,6 +10,7 @@ export function TextField({
   placeholder,
   hint,
   type = 'text',
+  disabled = false,
 }: {
   label: string;
   value: string;
@@ -17,6 +18,7 @@ export function TextField({
   placeholder?: string;
   hint?: string;
   type?: string;
+  disabled?: boolean;
 }) {
   return (
     <div>
@@ -26,7 +28,8 @@ export function TextField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+        disabled={disabled}
+        className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
       />
       {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
     </div>
@@ -40,6 +43,7 @@ export function SecretField({
   placeholder,
   hint,
   saved,
+  disabled = false,
 }: {
   label: string;
   value: string;
@@ -47,6 +51,7 @@ export function SecretField({
   placeholder?: string;
   hint?: string;
   saved: boolean;
+  disabled?: boolean;
 }) {
   const [editing, setEditing] = useState(!saved);
   const [visible, setVisible] = useState(false);
@@ -64,7 +69,7 @@ export function SecretField({
   return (
     <div>
       <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}</label>
-      {saved && !editing ? (
+      {saved && !editing && !disabled ? (
         <div className="flex items-center gap-2">
           <div className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
             <span className="font-mono tracking-widest">● ● ● ● ● ● ● ●</span>
@@ -77,6 +82,12 @@ export function SecretField({
             <Pencil className="h-4 w-4" />
           </button>
         </div>
+      ) : saved && !editing && disabled ? (
+        <div className="flex items-center gap-2">
+          <div className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+            <span className="font-mono tracking-widest">● ● ● ● ● ● ● ●</span>
+          </div>
+        </div>
       ) : (
         <div className="flex items-center gap-2">
           <input
@@ -84,22 +95,26 @@ export function SecretField({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
-            className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            disabled={disabled}
+            className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
           />
           <button
             onClick={() => setVisible(!visible)}
-            className="rounded-lg border p-2 text-slate-600 hover:bg-slate-50 transition-colors"
+            disabled={disabled}
+            className="rounded-lg border p-2 text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title={visible ? '隐藏' : '显示'}
           >
             {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
-          <button
-            onClick={handleSave}
-            className="rounded-lg border p-2 text-blue-600 hover:bg-blue-50 transition-colors"
-            title="完成"
-          >
-            <CheckCircle className="h-4 w-4" />
-          </button>
+          {!disabled && (
+            <button
+              onClick={handleSave}
+              className="rounded-lg border p-2 text-blue-600 hover:bg-blue-50 transition-colors"
+              title="完成"
+            >
+              <CheckCircle className="h-4 w-4" />
+            </button>
+          )}
         </div>
       )}
       {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
@@ -114,6 +129,7 @@ export function TextArea({
   placeholder,
   hint,
   rows = 3,
+  disabled = false,
 }: {
   label: string;
   value: string;
@@ -121,6 +137,7 @@ export function TextArea({
   placeholder?: string;
   hint?: string;
   rows?: number;
+  disabled?: boolean;
 }) {
   return (
     <div>
@@ -130,7 +147,8 @@ export function TextArea({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+        disabled={disabled}
+        className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
       />
       {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
     </div>
@@ -143,12 +161,14 @@ export function SelectField({
   options,
   onChange,
   hint,
+  disabled = false,
 }: {
   label: string;
   value: string;
   options: { value: string; label: string }[];
   onChange: (v: string) => void;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
     <div>
@@ -156,7 +176,8 @@ export function SelectField({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+        disabled={disabled}
+        className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>{opt.label}</option>

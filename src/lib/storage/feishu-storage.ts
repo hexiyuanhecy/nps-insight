@@ -21,6 +21,7 @@ import {
   resolveTableId,
 } from '../feishu/bitable';
 import { getTenantAccessToken } from '../feishu/client';
+import { DEFAULT_PAGE_SIZE } from '@/constants/app-constants';
 
 const BITABLE_API_BASE = 'https://open.feishu.cn/open-apis/bitable/v1';
 
@@ -157,7 +158,7 @@ export class FeishuStorageAdapter implements StorageAdapter {
    */
   async loadAllToMap(tableId: string, keyField?: string): Promise<Map<string, BitableRecord>> {
     const resolvedTableId = resolveTableId(tableId);
-    const records = await listRecords(resolvedTableId, { pageSize: 500 });
+    const records = await listRecords(resolvedTableId, { pageSize: DEFAULT_PAGE_SIZE });
     
     const map = new Map<string, BitableRecord>();
     const key = keyField || 'record_id';
@@ -199,7 +200,7 @@ export class FeishuStorageAdapter implements StorageAdapter {
       ],
     });
     
-    return listRecords(resolvedTableId, { filter, pageSize: 500 });
+    return listRecords(resolvedTableId, { filter, pageSize: DEFAULT_PAGE_SIZE });
   }
 
   /**

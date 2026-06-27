@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, TENANT_FIELDS } from '@/lib/feishu/constants';
+import { DEFAULT_PAGE_SIZE } from '@/constants/app-constants';
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1', 10);
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
 
-    const records = await bitableClient.listRecords(TABLE_NAMES.TENANTS, { pageSize: 500 });
+    const records = await bitableClient.listRecords(TABLE_NAMES.TENANTS, { pageSize: DEFAULT_PAGE_SIZE });
     const tenants = records.map((r) => ({
       tenantId: String(r.fields[TENANT_FIELDS.TENANT_ID] || ''),
       tenantName: String(r.fields[TENANT_FIELDS.TENANT_NAME] || ''),

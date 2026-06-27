@@ -8,10 +8,11 @@
 type Config = Record<string, unknown>;
 
 // KV 客户端（延迟初始化）
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// 使用 any 类型：第三方 @vercel/kv 类型在未安装时不可用
+// eslint-disable-next-line
 let kvClient: any = null;
 
-// 内存降级缓存
+// 内存降级缓存 — 存储 JSON 字符串
 const memoryCache = new Map<string, string>();
 
 /**
@@ -28,6 +29,7 @@ async function getKvClient() {
   }
 
   try {
+    // @ts-ignore - @vercel/kv 为可选依赖，未安装时自动降级到内存缓存
     const { createClient } = await import('@vercel/kv');
     kvClient = createClient({
       url: process.env.KV_REST_API_URL,
@@ -49,14 +51,26 @@ async function getKvClient() {
 export async function getConfig(ownerUserId: string): Promise<Config | null> {
   const client = await getKvClient();
   if (!client) {
-    return memoryCache.get(`config:${ownerUserId}`) as Config | null ?? null;
+    const raw = memoryCache.get(`config:${ownerUserId}`);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as Config;
+    } catch {
+      return null;
+    }
   }
 
   try {
-    const result = await client.get<Config>(`config:${ownerUserId}`);
-    return result ?? null;
+    const result = await client.get(`config:${ownerUserId}`);
+    return (result as Config | null) ?? null;
   } catch {
-    return memoryCache.get(`config:${ownerUserId}`) as Config | null ?? null;
+    const raw = memoryCache.get(`config:${ownerUserId}`);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as Config;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -68,7 +82,7 @@ export async function setConfig(ownerUserId: string, config: Config): Promise<bo
   const key = `config:${ownerUserId}`;
 
   if (!client) {
-    memoryCache.set(key, config as unknown as string);
+    memoryCache.set(key, JSON.stringify(config));
     return true;
   }
 
@@ -77,7 +91,7 @@ export async function setConfig(ownerUserId: string, config: Config): Promise<bo
     return true;
   } catch {
     // 降级到内存缓存
-    memoryCache.set(key, config as unknown as string);
+    memoryCache.set(key, JSON.stringify(config));
     return true;
   }
 }
@@ -94,8 +108,8 @@ export async function getUserMapping(userId: string): Promise<string | null> {
   }
 
   try {
-    const result = await client.get<string>(`userConfigMapping:${userId}`);
-    return result ?? null;
+    const result = await client.get(`userConfigMapping:${userId}`);
+    return (result as string | null) ?? null;
   } catch {
     return memoryCache.get(`userConfigMapping:${userId}`) ?? null;
   }
@@ -159,7 +173,7 @@ export async function listAllConfigKeys(): Promise<string[]> {
     // ponytail: 使用 scan 而非 keys()，避免阻塞
     let cursor = 0;
     do {
-      const [nextCursor, batch] = await client.scan<string>({ cursor, match: 'config:*', count: 100 });
+      const [nextCursor, batch] = await client.scan({ cursor, match: 'config:*', count: 100 });
       cursor = nextCursor;
       keys.push(...batch);
     } while (cursor !== 0);
@@ -182,7 +196,7 @@ export async function listAllMappingKeys(): Promise<string[]> {
     const keys: string[] = [];
     let cursor = 0;
     do {
-      const [nextCursor, batch] = await client.scan<string>({ cursor, match: 'userConfigMapping:*', count: 100 });
+      const [nextCursor, batch] = await client.scan({ cursor, match: 'userConfigMapping:*', count: 100 });
       cursor = nextCursor;
       keys.push(...batch);
     } while (cursor !== 0);
@@ -209,7 +223,7 @@ async function isMigrationCompleted(): Promise<boolean> {
   }
 
   try {
-    const flag = await client.get<string>(MIGRATION_FLAG_KEY);
+    const flag = await client.get(MIGRATION_FLAG_KEY);
     return flag === 'true';
   } catch {
     return memoryCache.has(MIGRATION_FLAG_KEY);

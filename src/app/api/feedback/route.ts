@@ -16,6 +16,7 @@ import {
   PaginatedResponse,
 } from '@/lib/types';
 import { analyzeFeedback, getCachedTags } from '@/lib/ai/tagger';
+import { DEFAULT_PAGE_SIZE } from '@/constants/app-constants';
 
 // ============================================
 // GET - 获取反馈列表
@@ -60,7 +61,7 @@ export async function GET(request: NextRequest) {
     // 查询记录
     const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
       filter,
-      pageSize: 500, // 先获取所有，再内存分页
+      pageSize: DEFAULT_PAGE_SIZE, // 先获取所有，再内存分页
     });
 
     // 转换为Feedback对象

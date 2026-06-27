@@ -8,6 +8,7 @@ import { getDefaultStorage } from '../adapter-factory';
 import { calculateSimilarity } from '../utils/similarity';
 import { BitableRecord } from '@/lib/types';
 import { TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS, FEEDBACK_FIELDS } from '../feishu/constants';
+import { DEFAULT_PAGE_SIZE } from '@/constants/app-constants';
 
 /**
  * 标签记录
@@ -280,7 +281,7 @@ export class TagEvolution {
   private async getAffectedFeedbackCount(tagNames: string[], level: 'Tag1' | 'Tag2' | 'Tag3'): Promise<number> {
     try {
       const feedbacks = await this.storage.listRecords(TABLES.FEEDBACK, {
-        pageSize: 500,
+        pageSize: DEFAULT_PAGE_SIZE,
       });
 
       let count = 0;
@@ -321,7 +322,7 @@ export class TagEvolution {
     const mergedRecordId = mergedTag.record_id;
 
     // 2. 查找所有引用旧标签的反馈记录
-    const feedbacks = await this.storage.listRecords(TABLES.FEEDBACK, { pageSize: 500 });
+    const feedbacks = await this.storage.listRecords(TABLES.FEEDBACK, { pageSize: DEFAULT_PAGE_SIZE });
     const level = tag1.fields.level;
     const fbField = level === 'Tag1' ? FEEDBACK_FIELDS.TAG1 :
                     level === 'Tag2' ? FEEDBACK_FIELDS.TAG2 :
@@ -374,7 +375,7 @@ export class TagEvolution {
       }))
     );
 
-    const feedbacks = await this.storage.listRecords(TABLES.FEEDBACK, { pageSize: 500 });
+    const feedbacks = await this.storage.listRecords(TABLES.FEEDBACK, { pageSize: DEFAULT_PAGE_SIZE });
     const level = originalTag.fields.level;
     const fbField = level === 'Tag1' ? FEEDBACK_FIELDS.TAG1 :
                     level === 'Tag2' ? FEEDBACK_FIELDS.TAG2 :

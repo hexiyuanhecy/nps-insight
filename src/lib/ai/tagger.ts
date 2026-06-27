@@ -8,6 +8,7 @@ import { chatCompletionJSON } from './index';
 import { generateBatchTaggingPrompt } from './prompts';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS } from '@/lib/feishu/constants';
+import { DEFAULT_PAGE_SIZE, FIVE_MINUTES_MS } from '@/constants/app-constants';
 
 // ============================================
 // 类型定义
@@ -39,7 +40,7 @@ export interface TagRecord {
 
 let _tagCache: TagRecord[] | null = null;
 let _tagCacheTime = 0;
-const TAG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟缓存
+const TAG_CACHE_TTL_MS = FIVE_MINUTES_MS;
 
 /**
  * 获取已有标签（带缓存）
@@ -130,7 +131,7 @@ export async function batchAnalyzeFeedbacks(
   const inputs = batch
     .filter(f => f.content)
     .map((fb, idx) => ({
-      id: String(idx),
+      id: fb.record_id,
       content: fb.content,
       score: fb.score,
       source: fb.source,
@@ -372,7 +373,7 @@ export async function getAllTags(): Promise<TagRecord[]> {
     const allTags: TagRecord[] = [];
 
     // 1. 从 TAG1 表读取一级标签
-    const tag1Records = await bitableClient.listRecords(TABLE_NAMES.TAG1, { pageSize: 500 });
+    const tag1Records = await bitableClient.listRecords(TABLE_NAMES.TAG1, { pageSize: DEFAULT_PAGE_SIZE });
     for (const record of tag1Records) {
       const name = String(record.fields[TAG1_FIELDS.TAG_NAME] || '');
       if (name) {
@@ -389,7 +390,7 @@ export async function getAllTags(): Promise<TagRecord[]> {
     }
 
     // 2. 从 TAG2 表读取二级标签
-    const tag2Records = await bitableClient.listRecords(TABLE_NAMES.TAG2, { pageSize: 500 });
+    const tag2Records = await bitableClient.listRecords(TABLE_NAMES.TAG2, { pageSize: DEFAULT_PAGE_SIZE });
     for (const record of tag2Records) {
       const name = String(record.fields[TAG2_FIELDS.TAG_NAME] || '');
       if (name) {
@@ -406,7 +407,7 @@ export async function getAllTags(): Promise<TagRecord[]> {
     }
 
     // 3. 从 TAG3 表读取三级标签
-    const tag3Records = await bitableClient.listRecords(TABLE_NAMES.TAG3, { pageSize: 500 });
+    const tag3Records = await bitableClient.listRecords(TABLE_NAMES.TAG3, { pageSize: DEFAULT_PAGE_SIZE });
     for (const record of tag3Records) {
       const name = String(record.fields[TAG3_FIELDS.TAG_NAME] || '');
       if (name) {

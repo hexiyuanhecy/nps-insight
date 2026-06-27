@@ -4,6 +4,7 @@
  */
 
 import { getFeishuClient } from './client';
+import { DEFAULT_TOP_N } from '@/constants/app-constants';
 
 /** 生成 UUID v4 */
 function generateUUID(): string {
@@ -392,7 +393,7 @@ export function createAnalysisCard(analysis: {
   }
 
   // TOP 问题标签按钮
-  const topIssueButtons: Record<string, unknown>[] = analysis.topIssues.slice(0, 5).map((issue) => {
+  const topIssueButtons: Record<string, unknown>[] = analysis.topIssues.slice(0, DEFAULT_TOP_N).map((issue) => {
     return {
       tag: 'button',
       text: {
@@ -972,7 +973,7 @@ export function createWeeklyReportCard(data: {
       text: {
         tag: 'lark_md',
         content: `**📋 Top 5 问题**\n${topIssues
-          .slice(0, 5)
+          .slice(0, DEFAULT_TOP_N)
           .map(
             (t, i) =>
               `${i + 1}. ${t.tag3} (${t.tag2}) - ${t.count}次 (${t.pct}%)`
@@ -1095,7 +1096,7 @@ export function createMonthlyReportCard(data: {
   // Top 问题摘要
   if (topIssues && topIssues.length > 0) {
     const summary = topIssues
-      .slice(0, 5)
+      .slice(0, DEFAULT_TOP_N)
       .map(
         (issue, i) =>
           `${i + 1}. ${issue.tag3} (${issue.tag2}) - ${issue.count}次，大租户占${Math.round(issue.largeTenantRatio * 100)}%`
@@ -1201,6 +1202,75 @@ export function createMonthlyReportCard(data: {
 }
 
 // ============================================
+// 错误通知卡片
+// ============================================
+
+/**
+ * 创建任务执行失败通知卡片
+ */
+export function createErrorNotifyCard(data: {
+  taskType: '周打标' | '月分析' | '手动同步';
+  errorMessage: string;
+  executedAt?: string;
+}): InteractiveMessageContent {
+  const { taskType, errorMessage, executedAt } = data;
+  const time = executedAt || new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      title: { tag: 'lark_md', content: `**❌ ${taskType}执行失败**` },
+      template: 'red',
+    },
+    elements: [
+      {
+        tag: 'div',
+        text: {
+          tag: 'lark_md',
+          content: `**任务类型：** ${taskType}\n**执行时间：** ${time}\n**错误信息：** ${errorMessage}`,
+        },
+      },
+      {
+        tag: 'div',
+        text: {
+          tag: 'lark_md',
+          content: '**建议：** 请检查配置是否正确，或联系管理员排查问题。',
+        },
+      },
+      {
+        tag: 'action',
+        actions: [
+          {
+            tag: 'button',
+            text: { tag: 'lark_md', content: '**重新执行**' },
+            type: 'primary',
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * 发送任务失败通知到指定群
+ */
+export async function sendErrorNotify(
+  chatId: string,
+  taskType: '周打标' | '月分析' | '手动同步',
+  errorMessage: string
+): Promise<boolean> {
+  try {
+    const card = createErrorNotifyCard({ taskType, errorMessage });
+    await sendCardMessage(chatId, card);
+    console.log(`[Bot] ${taskType}失败通知已发送`);
+    return true;
+  } catch (err) {
+    console.error(`[Bot] 发送${taskType}失败通知失败:`, err);
+    return false;
+  }
+}
+
+// ============================================
 // 导出便捷对象
 // ============================================
 
@@ -1214,4 +1284,6 @@ export const feishuBot = {
   createWeeklyReportCard,
   createMonthlyReportCard,
   createHelpCard,
+  createErrorNotifyCard,
+  sendErrorNotify,
 };

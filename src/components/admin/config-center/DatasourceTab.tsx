@@ -1,4 +1,4 @@
-import { Calendar, Database, FileJson, Link, Save, Upload } from 'lucide-react';
+import { Calendar, Database, FileJson, Link, Upload } from 'lucide-react';
 import type { ConfigCenterController } from '@/components/admin/config-center/use-config-center';
 import {
   PrimaryButton,
@@ -15,8 +15,11 @@ interface DatasourceTabProps {
 }
 
 export function DatasourceTab({ ctrl }: DatasourceTabProps) {
-  const { config } = ctrl;
+  const { config, isEditing } = ctrl;
   if (!config) return null;
+
+  // 禁用状态：非编辑模式时禁用所有输入框
+  const disabled = !isEditing;
 
   return (
     <div className="space-y-6">
@@ -24,9 +27,9 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <SectionTitle icon={<Database className="h-5 w-5" />} title="反馈来源 - API" desc="定期从 Feelgood 或其他数据源拉取反馈" />
         <div className="grid gap-4">
-          <TextField label="API 地址" value={config.dataSource.apiUrl} onChange={(v) => ctrl.updateDataSource('apiUrl', v)} placeholder="https://api.feelgood.example.com/feedback" hint="含协议与路径" />
-          <SecretField label="API Key" value={config.dataSource.apiKey} onChange={(v) => ctrl.updateDataSource('apiKey', v)} saved={!!config.dataSource.apiKey} placeholder="Bearer token" hint="需要鉴权时填写" />
-          <TextField label="查询参数（可选）" value={config.dataSource.queryParams} onChange={(v) => ctrl.updateDataSource('queryParams', v)} placeholder="type=nps&status=new" hint="拼接到 URL 后面" />
+          <TextField label="API 地址" value={config.dataSource.apiUrl} onChange={(v) => ctrl.updateDataSource('apiUrl', v)} placeholder="https://api.feelgood.example.com/feedback" hint="含协议与路径" disabled={disabled} />
+          <SecretField label="API Key" value={config.dataSource.apiKey} onChange={(v) => ctrl.updateDataSource('apiKey', v)} saved={!!config.dataSource.apiKey} placeholder="Bearer token" hint="需要鉴权时填写" disabled={disabled} />
+          <TextField label="查询参数（可选）" value={config.dataSource.queryParams} onChange={(v) => ctrl.updateDataSource('queryParams', v)} placeholder="type=nps&status=new" hint="拼接到 URL 后面" disabled={disabled} />
           <SelectField
             label="时间范围规则"
             value={config.dataSource.timeRule}
@@ -36,10 +39,8 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
               { value: 'custom', label: '自定义（由查询参数决定）' },
             ]}
             onChange={(v) => ctrl.updateDataSource('timeRule', v as typeof config.dataSource.timeRule)}
+            disabled={disabled}
           />
-        </div>
-        <div className="mt-4">
-          <PrimaryButton onClick={() => ctrl.saveSectionConfig('数据源')} loading={ctrl.isLoading} icon={<Save className="h-4 w-4" />}>保存配置</PrimaryButton>
         </div>
       </section>
 
@@ -55,7 +56,7 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
-                if (file) ctrl.importExcel(file);
+                if (file) ctrl.importExcel(file, 'datasource');
                 // 重置 input 以便重复上传同一文件
                 e.target.value = '';
               }}
@@ -86,6 +87,7 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
             onChange={ctrl.updateWebhook}
             placeholder="/api/webhook/feelgood"
             hint="外部系统把新反馈 POST 到这里"
+            disabled={disabled}
           />
           <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
             <div className="font-semibold mb-1">📖 这个地址是做什么用的？</div>
@@ -96,9 +98,6 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
               <li>与飞书无关，不依赖 App ID / Secret</li>
               <li>建议同时开启「定期拉取」+「Webhook」双保险</li>
             </ul>
-          </div>
-          <div className="mt-4">
-            <PrimaryButton onClick={() => ctrl.saveSectionConfig('Webhook 接收地址')} loading={ctrl.isLoading} icon={<Save className="h-4 w-4" />}>保存配置</PrimaryButton>
           </div>
         </section>
       </div>
@@ -112,24 +111,19 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
           onChange={ctrl.updateLogPlatform}
           placeholder="https://log.example.com/?userId={{userId}}&from={{start}}&to={{end}}"
           hint="支持 {{userId}} / {{start}} / {{end}} 占位符"
+          disabled={disabled}
         />
         <div className="mt-3 flex items-center gap-3">
           <button
             onClick={() => ctrl.updateLogPlatform(MOCK_LOG_URL)}
-            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
+            disabled={disabled}
+            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             填入 Mock URL 体验
           </button>
           <span className="text-xs text-slate-500">点击后将示例 URL 回填到上方输入框</span>
         </div>
-        <div className="mt-4">
-          <PrimaryButton onClick={() => ctrl.saveSectionConfig('日志平台 URL')} loading={ctrl.isLoading} icon={<Save className="h-4 w-4" />}>保存配置</PrimaryButton>
-        </div>
       </section>
-
-      <div className="flex justify-end gap-3">
-        <SecondaryButton onClick={ctrl.persistScheduleAndSave} loading={ctrl.isLoading} icon={<Save className="h-4 w-4" />}>保存全部配置</SecondaryButton>
-      </div>
     </div>
   );
 }

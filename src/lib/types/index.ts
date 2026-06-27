@@ -477,3 +477,50 @@ export interface BitableQueryParams {
   /** 字段列表 */
   fieldNames?: string[];
 }
+
+// ============================================
+// 用户云资源相关类型
+// ============================================
+
+/** 用户云资源 —— 4个核心Token + 用户授权信息 */
+export interface UserResource {
+  /** 用户根文件夹ID */
+  rootFolderToken: string;
+  /** 周报归档文件夹ID */
+  reportFolderToken: string;
+  /** 月报汇总文件夹ID */
+  monthFolderToken: string;
+  /** 多维表格Base总Token */
+  bitableBaseToken: string;
+  /** 用户open_id */
+  userOpenId?: string;
+  
+  /** 用户access_token（OAuth获取） */
+  userAccessToken?: string;
+  /** refresh_token（用于刷新access_token） */
+  refreshToken?: string;
+  /** access_token过期时间戳（Unix秒） */
+  tokenExpiresAt?: number;
+  /** 用户名称（用于文件夹命名） */
+  userName?: string;
+}
+
+/** 用户资源存储接口 */
+export interface UserResourceStore {
+  /** 获取当前用户资源 */
+  get(): Promise<UserResource | null>;
+  /** 保存用户资源 */
+  save(resource: UserResource): Promise<void>;
+  /** 保存用户授权Token */
+  saveUserToken?(accessToken: string, refreshToken: string, expiresIn: number): Promise<void>;
+  /** 获取有效的access_token（自动判断是否需要刷新） */
+  getValidAccessToken?(): Promise<string | null>;
+  /** 获取refresh_token */
+  getRefreshToken?(): Promise<string | null>;
+  /** 清除用户授权Token */
+  clearUserToken?(): Promise<void>;
+  /** 判断资源是否已初始化（4个Token都有值） */
+  exists(): Promise<boolean>;
+  /** 判断用户是否已授权（access_token有效或有refresh_token） */
+  isUserAuthorized?(): Promise<boolean>;
+}

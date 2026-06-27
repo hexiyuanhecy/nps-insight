@@ -9,6 +9,7 @@ import { feishuBot, createHelpCard, createAnalysisCard, createFeedbackCard, crea
 import { bitableClient, extractMultiSelectFieldValue } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, ANALYSIS_FIELDS } from '@/lib/feishu/constants';
 import { handleQuestion } from '@/lib/ai/chatbot';
+import { DEFAULT_PAGE_SIZE } from '@/constants/app-constants';
 
 // ============================================
 // Webhook处理
@@ -262,7 +263,7 @@ async function handleReport(cmd: BotCommand): Promise<void> {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
-      pageSize: 500,
+      pageSize: DEFAULT_PAGE_SIZE,
     });
 
     const recentFeedbacks = records.filter((r) => {
@@ -356,7 +357,7 @@ async function handleConfig(cmd: BotCommand): Promise<void> {
 async function handleStatus(cmd: BotCommand): Promise<void> {
   try {
     const records = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
-      pageSize: 500,
+      pageSize: DEFAULT_PAGE_SIZE,
     });
 
     const total = records.length;

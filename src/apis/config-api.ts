@@ -68,31 +68,15 @@ export async function retagHistory(config: TabConfig): Promise<ConfigApiResponse
 /**
  * 手动触发周打标流程
  */
-export async function runWeeklyTagging(): Promise<ConfigApiResponse> {
-  const response = await fetch('/api/cron/sync', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    console.error('[API Error] runWeeklyTagging', response.status, data);
-  }
-  return data as ConfigApiResponse;
+export async function runWeeklyTagging(config?: TabConfig): Promise<ConfigApiResponse> {
+  return postConfig({ action: 'runManualSync', config });
 }
 
 /**
  * 手动触发月分析流程
  */
-export async function runMonthlyAnalysis(): Promise<ConfigApiResponse> {
-  const response = await fetch('/api/cron/monthly', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    console.error('[API Error] runMonthlyAnalysis', response.status, data);
-  }
-  return data as ConfigApiResponse;
+export async function runMonthlyAnalysis(config?: TabConfig): Promise<ConfigApiResponse> {
+  return postConfig({ action: 'runMonthlyAnalysis', config });
 }
 
 export interface ExcelUploadResult {
@@ -109,4 +93,134 @@ export async function uploadExcel(file: File): Promise<ExcelUploadResult> {
     body: formData,
   });
   return response.json() as Promise<ExcelUploadResult>;
+}
+
+// ============================================
+// 用户资源相关 API
+// ============================================
+
+export interface UserResource {
+  rootFolderToken: string;
+  reportFolderToken: string;
+  monthFolderToken: string;
+  bitableBaseToken: string;
+  userOpenId?: string;
+  userName?: string;
+  userAccessToken?: string;
+  refreshToken?: string;
+  tokenExpiresAt?: number;
+}
+
+export interface UserResourceResponse {
+  success: boolean;
+  error?: string;
+  data?: {
+    exists: boolean;
+    resource?: UserResource;
+    isNew?: boolean;
+  };
+}
+
+/**
+ * 获取用户资源状态
+ */
+export async function getUserResource(): Promise<UserResourceResponse> {
+  const response = await fetch('/api/user-resource');
+  return response.json() as Promise<UserResourceResponse>;
+}
+
+/**
+ * 触发用户资源初始化
+ */
+export async function initUserResource(
+  userName?: string,
+  userOpenId?: string
+): Promise<UserResourceResponse> {
+  const response = await fetch('/api/user-resource', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userName, userOpenId }),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    console.error('[API Error] initUserResource', response.status, data);
+  }
+  return data as UserResourceResponse;
+}
+
+// ============================================
+// 用户授权相关 API
+// ============================================
+
+export interface AuthStatusResponse {
+  success: boolean;
+  error?: string;
+  data?: {
+    isAuthorized: boolean;
+    userInfo?: {
+      open_id: string;
+      union_id: string;
+      name: string;
+      avatar_url?: string;
+      email?: string;
+      user_id?: string;
+    };
+    tokenExpiresAt?: number;
+    remainingSeconds?: number;
+    userOpenId?: string;
+    userName?: string;
+  };
+}
+
+export interface AuthUrlResponse {
+  success: boolean;
+  error?: string;
+  data?: {
+    authUrl: string;
+    redirectUri: string;
+  };
+}
+
+/**
+ * 获取用户授权状态
+ */
+export async function getAuthStatus(): Promise<AuthStatusResponse> {
+  const response = await fetch('/api/user-resource?action=auth-status');
+  return response.json() as Promise<AuthStatusResponse>;
+}
+
+/**
+ * 获取授权URL
+ */
+export async function getAuthUrl(): Promise<AuthUrlResponse> {
+  const response = await fetch('/api/user-resource?action=auth-url');
+  return response.json() as Promise<AuthUrlResponse>;
+}
+
+/**
+ * 授权回调处理
+ */
+export async function authCallback(code: string): Promise<AuthStatusResponse> {
+  const response = await fetch('/api/user-resource?action=auth-callback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    console.error('[API Error] authCallback', response.status, data);
+  }
+  return data as AuthStatusResponse;
+}
+
+/**
+ * 退出授权
+ */
+export async function authLogout(): Promise<{ success: boolean; error?: string }> {
+  const response = await fetch('/api/user-resource?action=auth-logout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  return response.json();
 }

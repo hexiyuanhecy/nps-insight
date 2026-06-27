@@ -4,9 +4,9 @@
   "description": "基于飞书生态的AI驱动NPS反馈分析工具",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3002",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3002",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "test:full:clean": "ts-node scripts/test-full-flow.ts --clean",

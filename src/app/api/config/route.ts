@@ -28,7 +28,10 @@ import {
   saveTag1ToBitable,
 } from '@/lib/feishu/bitable-setup';
 import { notifyConfigChange } from '@/lib/notification/delay-notifier';
-import { setConfig } from '@/lib/storage/kv-storage';
+import { setConfig, getConfig } from '@/lib/storage/kv-storage';
+import { LocalUserResourceStore } from '@/lib/storage/user-resource-store';
+import { DEFAULT_PAGE_SIZE, DEFAULT_BATCH_SIZE, FIVE_MINUTES_MS } from '@/constants/app-constants';
+import { runSyncTask } from '@/app/api/cron/sync/sync-task';
 
 // ============================================
 // 默认配置（当环境变量为空时使用）
@@ -225,7 +228,113 @@ function buildV3Config(): any {
 
 export async function GET(request: NextRequest) {
   try {
-    const config = buildV3Config();
+    // 重新读取 .env 文件以获取最新保存的值
+    const envConfig = (() => {
+      try {
+        const envPath = path.join(process.cwd(), '.env');
+        const content = fs.readFileSync(envPath, 'utf-8');
+        const envVars: Record<string, string> = {};
+        for (const line of content.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+          const eqIdx = trimmed.indexOf('=');
+          if (eqIdx > 0) {
+            const key = trimmed.substring(0, eqIdx).trim();
+            const value = trimmed.substring(eqIdx + 1).trim();
+            envVars[key] = value;
+          }
+        }
+        return envVars;
+      } catch {
+        return {} as Record<string, string>;
+      }
+    })();
+
+    // 构建完整配置对象，优先使用 .env 文件中的最新值
+    const feishuConfig = {
+      appId: envConfig.FEISHU_APP_ID || process.env.FEISHU_APP_ID || '',
+      appSecret: envConfig.FEISHU_APP_SECRET || process.env.FEISHU_APP_SECRET || '',
+    };
+    const bitableConfig = {
+      mode: (envConfig.BITABLE_MODE || process.env.BITABLE_MODE || 'link') as 'create' | 'link',
+      appToken: envConfig.BITABLE_TOKEN || process.env.BITABLE_TOKEN || '',
+      url: envConfig.BITABLE_URL || process.env.BITABLE_URL || '',
+      feedbackTableId: envConfig.BITABLE_FEEDBACK_TABLE_ID || process.env.BITABLE_TABLE_ID || '',
+      tagsTableId: envConfig.BITABLE_TAGS_TABLE_ID || process.env.BITABLE_TABLE_ID_TAGS || '',
+      tenantsTableId: envConfig.BITABLE_TENANTS_TABLE_ID || process.env.BITABLE_TABLE_ID_TENANTS || '',
+      analysisTableId: envConfig.BITABLE_ANALYSIS_TABLE_ID || process.env.BITABLE_TABLE_ID_ANALYSIS || '',
+      status: (envConfig.BITABLE_TOKEN || process.env.BITABLE_TOKEN) ? 'linked' : 'unset' as 'linked' | 'unset' | 'error',
+    };
+    const dataSourceConfig = {
+      apiUrl: envConfig.DATA_SOURCE_API_URL || process.env.DATA_SOURCE_API_URL || '',
+      apiKey: envConfig.DATA_SOURCE_API_KEY || process.env.DATA_SOURCE_API_KEY || '',
+      queryParams: envConfig.DATA_SOURCE_QUERY_PARAMS || process.env.DATA_SOURCE_QUERY_PARAMS || '{ "start": "{{start_unix}}", "end": "{{end_unix}}" }',
+      timeRule: (envConfig.DATA_SOURCE_TIME_RULE || process.env.DATA_SOURCE_TIME_RULE || 'lastWeek') as 'lastWeek' | 'lastMonth' | 'custom',
+    };
+    const aiConfig = {
+      provider: (envConfig.AGNESAI_PROVIDER || process.env.AGNESAI_PROVIDER || 'agnesai') as 'agnesai' | 'custom',
+      apiKey: envConfig.AGNESAI_API_KEY || process.env.AGNESAI_API_KEY || '',
+      baseUrl: envConfig.AGNESAI_BASE_URL || process.env.AGNESAI_BASE_URL || '',
+      model: envConfig.AGNESAI_MODEL || process.env.AGNESAI_MODEL || 'agnes-2.0-flash',
+    };
+    const taggingConfig = {
+      confidenceThreshold: parseFloat(envConfig.CONFIG_CONFIDENCE || process.env.CONFIG_CONFIDENCE || '0.8'),
+      largeTenantLevels: (envConfig.CONFIG_LARGE_TENANTS || process.env.CONFIG_LARGE_TENANTS || 'A4,A5').split(',').filter(Boolean),
+    };
+    const scheduleConfig = {
+      syncCron: envConfig.CRON_SYNC_SCHEDULE || process.env.CRON_SYNC_SCHEDULE || '0 9 * * 1',
+      analysisCron: envConfig.CRON_ANALYSIS_SCHEDULE || process.env.CRON_ANALYSIS_SCHEDULE || '0 0 1 * *',
+      devMode: envConfig.CRON_DEV_MODE ? envConfig.CRON_DEV_MODE === 'true' : (process.env.CRON_DEV_MODE === 'true'),
+    };
+    const logPlatformConfig = {
+      urlTemplate: envConfig.LOG_PLATFORM_URL_TEMPLATE || process.env.LOG_PLATFORM_URL_TEMPLATE || '',
+    };
+    const notificationConfig = {
+      chatIds: envConfig.NOTIFICATION_CHAT_ID || process.env.NOTIFICATION_CHAT_ID || '',
+      adminUserIds: envConfig.NOTIFICATION_ADMIN_USER_IDS || process.env.NOTIFICATION_ADMIN_USER_IDS || '',
+    };
+    const webhookConfig = { url: '/api/webhook/feelgood' };
+    let tag1Config = DEFAULT_TAG1;
+    if (envConfig.CONFIG_TAG1 || process.env.CONFIG_TAG1) {
+      try {
+        const parsed = JSON.parse(envConfig.CONFIG_TAG1 || process.env.CONFIG_TAG1 || '[]');
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          tag1Config = parsed;
+        }
+      } catch {}
+    }
+    const tag2InitConfig = envConfig.CONFIG_TAG2_INIT || process.env.CONFIG_TAG2_INIT || '';
+
+    const config = {
+      feishu: feishuConfig,
+      bitable: bitableConfig,
+      dataSource: dataSourceConfig,
+      ai: aiConfig,
+      tagging: taggingConfig,
+      schedule: scheduleConfig,
+      logPlatform: logPlatformConfig,
+      notification: notificationConfig,
+      webhook: webhookConfig,
+      tag1: tag1Config,
+      tag2Init: tag2InitConfig,
+    };
+
+    // 从用户资源中读取 bitable token（优先级最高，确保两边一致）
+    try {
+      const userResourceStore = new LocalUserResourceStore();
+      const userResource = await userResourceStore.get();
+      if (userResource?.bitableBaseToken) {
+        // 用户资源中的 bitableBaseToken 优先级最高
+        if (config.bitable.appToken !== userResource.bitableBaseToken) {
+          console.log(`[API /config GET] 同步 bitable token: ${config.bitable.appToken.substring(0, 8) || '(空)'} → ${userResource.bitableBaseToken.substring(0, 8)}...`);
+          config.bitable.appToken = userResource.bitableBaseToken;
+          config.bitable.url = `https://www.feishu.cn/base/${userResource.bitableBaseToken}`;
+          config.bitable.status = 'linked';
+        }
+      }
+    } catch (syncErr) {
+      console.warn('[API /config GET] 同步用户资源失败:', syncErr instanceof Error ? syncErr.message : '未知错误');
+    }
 
     // 对敏感字段返回 ''（不在明文返回），前端通过 '已配置 / 未配置' 标识
     return NextResponse.json({
@@ -278,6 +387,9 @@ export async function POST(request: NextRequest) {
 
       case 'runManualSync':
         return runManualSyncAction(body.config);
+
+      case 'runMonthlyAnalysis':
+        return runMonthlyAnalysisAction(body.config);
 
       case 'retagHistory':
         return retagHistoryAction();
@@ -792,7 +904,34 @@ async function testNotify(body: any) {
 
 async function createBitableAction(data: any) {
   try {
-    const result = await createNPSInsightBitable(data.name || 'NPS Insight 反馈中心');
+    // 从用户资源中获取根文件夹 token 和用户授权信息（如果已初始化）
+    const userResourceStore = new LocalUserResourceStore();
+    const userResource = await userResourceStore.get();
+    const folderToken = userResource?.rootFolderToken;
+    const userAccessToken = userResource?.userAccessToken;
+    const refreshToken = userResource?.refreshToken;
+    const tokenExpiresAt = userResource?.tokenExpiresAt;
+    
+    if (folderToken) {
+      console.log('[创建表格] 用户资源已初始化，将在云文件夹下创建');
+      console.log(`[创建表格] 文件夹 token: ${folderToken}`);
+    } else {
+      console.log('[创建表格] 用户资源未初始化，将在默认位置创建');
+    }
+
+    if (userAccessToken) {
+      console.log('[创建表格] 使用用户身份创建多维表格');
+    } else {
+      console.log('[创建表格] 使用应用身份创建多维表格');
+    }
+
+    const result = await createNPSInsightBitable(
+      data.name || 'NPS Insight 反馈中心',
+      folderToken,
+      userAccessToken,
+      refreshToken,
+      tokenExpiresAt
+    );
 
     const newUrl = `https://www.feishu.cn/base/${result.appToken}`;
     notifyConfigChange('bitable', 'appToken', result.appToken);
@@ -805,6 +944,20 @@ async function createBitableAction(data: any) {
       tenantsTableId: result.tables?.tenantTableId || '',
       analysisTableId: result.tables?.periodTableId || '',
     };
+
+    // 同步更新用户资源中的 bitableBaseToken
+    if (userResource) {
+      try {
+        const updatedResource = {
+          ...userResource,
+          bitableBaseToken: appToken,
+        };
+        await userResourceStore.save(updatedResource);
+        console.log('[创建表格] 已同步更新用户资源中的 bitableBaseToken');
+      } catch (syncErr) {
+        console.warn('[创建表格] 同步更新用户资源失败:', syncErr instanceof Error ? syncErr.message : '未知错误');
+      }
+    }
 
     // 获取管理员用户 ID
     const adminUserIds = data.config?.notification?.adminUserIds ||
@@ -989,6 +1142,22 @@ async function linkBitableAction(data: any) {
     notifyConfigChange('bitable', 'appToken', appToken);
     notifyConfigChange('bitable', 'url', data.url || `https://www.feishu.cn/base/${appToken}`);
 
+    // 同步更新用户资源中的 bitableBaseToken
+    try {
+      const userResourceStore = new LocalUserResourceStore();
+      const userResource = await userResourceStore.get();
+      if (userResource) {
+        const updatedResource = {
+          ...userResource,
+          bitableBaseToken: appToken,
+        };
+        await userResourceStore.save(updatedResource);
+        console.log('[绑定表格] 已同步更新用户资源中的 bitableBaseToken');
+      }
+    } catch (syncErr) {
+      console.warn('[绑定表格] 同步更新用户资源失败:', syncErr instanceof Error ? syncErr.message : '未知错误');
+    }
+
     // 保存配置到 .env 和 KV（异步，不阻塞主线程）
     saveConfigV3({
       bitable: {
@@ -1054,19 +1223,41 @@ async function testLLMLegacy(data: any) {
 
 async function runManualSyncAction(config: any) {
   try {
-    // Proxy to the sync cron endpoint
+    // 直接调用内部函数，避免 HTTP fetch 死锁问题
+    console.log('[Config] 直接调用周同步内部函数');
+    const result = await runSyncTask();
+    return NextResponse.json({
+      success: result.success,
+      message: result.success ? '同步任务已执行' : '同步任务执行失败',
+      data: result,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { success: false, error: error instanceof Error ? error.message : '未知错误' },
+      { status: 500 }
+    );
+  }
+}
+
+// ============================================
+// 手动触发月分析任务
+// ============================================
+
+async function runMonthlyAnalysisAction(config: any) {
+  try {
+    // Proxy to the monthly cron endpoint
     const port = process.env.PORT || '3000';
     const cronSecret = process.env.CRON_SECRET;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (cronSecret) headers['Authorization'] = `Bearer ${cronSecret}`;
-    const res = await fetch(`http://localhost:${port}/api/cron/sync`, {
+    const res = await fetch(`http://localhost:${port}/api/cron/monthly`, {
       method: 'POST',
       headers,
     });
     const data = await res.json();
     return NextResponse.json({
       success: res.ok && data.success,
-      message: res.ok && data.success ? '同步任务已执行' : '同步任务执行失败: ' + data.error,
+      message: res.ok && data.success ? '月分析任务已执行' : '月分析任务执行失败: ' + data.error,
       data,
     });
   } catch (error) {
@@ -1119,7 +1310,7 @@ async function retagHistoryAction() {
 
     // 3. 获取所有反馈记录（不分页，一次性获取）
     const allRecords = await bitableClient.listRecords(TABLE_NAMES.FEEDBACK, {
-      pageSize: 500,
+      pageSize: DEFAULT_PAGE_SIZE,
     });
 
     if (allRecords.length === 0) {
@@ -1155,7 +1346,7 @@ async function retagHistoryAction() {
     console.log(`[Retag] 标签体系: Tag1=${tag1List.length}, Tag2=${tag2List.length}, Tag3=${tag3List.length}`);
 
     // 6. 批量处理（每批50条）
-    const batchSize = 50;
+    const batchSize = DEFAULT_BATCH_SIZE;
     for (let i = 0; i < recordsWithContent.length; i += batchSize) {
       const batch = recordsWithContent.slice(i, i + batchSize);
       const batchNum = Math.floor(i / batchSize) + 1;
@@ -1315,7 +1506,7 @@ interface DelayRetagTask {
 let globalDelayRetagTask: DelayRetagTask | null = null;
 
 // 延时5分钟
-const DELAY_RETAG_TIMEOUT_MS = 5 * 60 * 1000;
+const DELAY_RETAG_TIMEOUT_MS = FIVE_MINUTES_MS;
 
 /**
  * 安排延时重打标任务（5分钟后执行）

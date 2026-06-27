@@ -56,12 +56,22 @@ export class AdapterFactory {
   /**
    * 创建文档适配器
    */
-  static createDocument(type?: AdapterType): DocumentAdapter {
+  static createDocument(type?: AdapterType, options?: {
+    userAccessToken?: string;
+    userRefreshToken?: string;
+    tokenExpiresAt?: number;
+  }): DocumentAdapter {
     const documentType = type || (process.env.DOCUMENT_ADAPTER as AdapterType) || 'feishu';
     
     switch (documentType) {
       case 'feishu':
-        return new FeishuDocumentAdapter();
+        return new FeishuDocumentAdapter(
+          undefined,
+          undefined,
+          options?.userAccessToken,
+          options?.userRefreshToken,
+          options?.tokenExpiresAt
+        );
       case 'markdown':
         // TODO: 实现 MarkdownDocumentAdapter
         throw new Error('Markdown 文档适配器尚未实现');

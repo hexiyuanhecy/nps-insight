@@ -7,6 +7,7 @@ import { StorageAdapter, TABLES } from '../storage/base-storage';
 import { getDefaultStorage } from '../adapter-factory';
 import { BitableRecord } from '@/lib/types';
 import { TOP_ISSUES_FIELDS, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS, FEEDBACK_FIELDS } from '../feishu/constants';
+import { DEFAULT_PAGE_SIZE } from '@/constants/app-constants';
 
 /**
  * Top问题记录
@@ -89,7 +90,7 @@ export class TopIssuesGenerator {
       console.log(`[Top问题] 加载标签映射完成: Tag1=${this.tagMappings.tag1Map.size}, Tag2=${this.tagMappings.tag2Map.size}, Tag3=${this.tagMappings.tag3Map.size}`);
 
       const allFeedbacks = await this.storage.listRecords(TABLES.FEEDBACK, {
-        pageSize: 500,
+        pageSize: DEFAULT_PAGE_SIZE,
       });
 
       console.log(`[Top问题] 共 ${allFeedbacks.length} 条反馈`);
@@ -117,7 +118,7 @@ export class TopIssuesGenerator {
     console.log('[Top问题] 写入 Top 问题表');
 
     const existingIssues = await this.storage.listRecords(TABLES.TOP_ISSUES, {
-      pageSize: 500,
+      pageSize: DEFAULT_PAGE_SIZE,
     });
 
     const existingMap = new Map<string, BitableRecord>();
@@ -176,7 +177,7 @@ export class TopIssuesGenerator {
    * 从 Tag1/Tag2/Tag3 表读取所有标签，建立 recordId -> name 的映射
    */
   private async loadTagMappings(): Promise<void> {
-    const tag1Records = await this.storage.listRecords(TABLES.TAG1, { pageSize: 500 });
+    const tag1Records = await this.storage.listRecords(TABLES.TAG1, { pageSize: DEFAULT_PAGE_SIZE });
     this.tagMappings.tag1Map = new Map();
     for (const record of tag1Records) {
       const recordId = record.record_id;
@@ -186,7 +187,7 @@ export class TopIssuesGenerator {
       }
     }
 
-    const tag2Records = await this.storage.listRecords(TABLES.TAG2, { pageSize: 500 });
+    const tag2Records = await this.storage.listRecords(TABLES.TAG2, { pageSize: DEFAULT_PAGE_SIZE });
     this.tagMappings.tag2Map = new Map();
     for (const record of tag2Records) {
       const recordId = record.record_id;
@@ -196,7 +197,7 @@ export class TopIssuesGenerator {
       }
     }
 
-    const tag3Records = await this.storage.listRecords(TABLES.TAG3, { pageSize: 500 });
+    const tag3Records = await this.storage.listRecords(TABLES.TAG3, { pageSize: DEFAULT_PAGE_SIZE });
     this.tagMappings.tag3Map = new Map();
     for (const record of tag3Records) {
       const recordId = record.record_id;
