@@ -142,32 +142,6 @@ async function handleMonthlyTaskSingleUser(): Promise<NextResponse<MonthlyTaskRe
     notification: false,
   };
 
-  // DEV_MODE: 跳过所有飞书 API 调用，直接返回模拟结果
-  if (process.env.CRON_DEV_MODE === 'true') {
-    console.log('[月度任务 DEV] 开发模式：使用模拟数据');
-    const now = new Date();
-    const periodName = `${now.getFullYear()}年${now.getMonth() + 1}月`;
-
-    // [修改点6] DEV_MODE 下使用 V2 结果结构的模拟数据
-    result.evolution = {
-      success: true,
-      totalFeedbackCount: 0,
-      mode: 'full',
-      mergeTag3Count: 0,
-      newTag2Count: 0,
-      mergeTag2Count: 0,
-      manualReviewItems: [],
-    };
-    result.topIssues = [];
-    result.formulaSync = true;
-    result.meetingDoc = { documentId: 'mock_doc', url: process.env.FEISHU_BITABLE_URL || '' };
-    result.notification = true;
-    result.success = true;
-
-    console.log(`[月度任务 DEV] 完成 (${periodName})`);
-    return NextResponse.json(result);
-  }
-
   try {
     const storage = getDefaultStorage()
     const notification = getDefaultNotification()
@@ -296,8 +270,12 @@ async function handleMonthlyTaskSingleUser(): Promise<NextResponse<MonthlyTaskRe
       console.error('[月度任务] 获取当月反馈数失败:', countErr)
     }
 
-    const notificationChannels =
-      process.env.NOTIFICATION_CHANNELS?.split(',') || []
+    // 通知渠道：优先 NOTIFICATION_CHANNELS，兼容 NOTIFICATION_CHAT_ID
+    let notificationChannels =
+      process.env.NOTIFICATION_CHANNELS?.split(',').filter(Boolean) || []
+    if (notificationChannels.length === 0 && process.env.NOTIFICATION_CHAT_ID) {
+      notificationChannels = [process.env.NOTIFICATION_CHAT_ID]
+    }
     if (notificationChannels.length > 0) {
       // [修改点4] 适配 V2 结果结构，从 V2 结果中获取合并数和拆分数
       const card = createMonthlyReportCard({
@@ -309,9 +287,9 @@ async function handleMonthlyTaskSingleUser(): Promise<NextResponse<MonthlyTaskRe
         mergeCount: result.evolution?.mergeTag3Count || 0,
         splitCount: result.evolution?.newTag2Count || 0,
         topIssues: (result.topIssues || []).map((issue: any) => ({
-          tag3: issue.tag3Names?.join(', ') || '',
-          tag2: issue.tag2Name || '',
-          count: issue.totalCount || 0,
+          tag3: issue.tag3Names?.join(', ') || (issue.tag3 || ''),
+          tag2: issue.tag2Name || issue.tag2 || '',
+          count: issue.totalCount || issue.count || 0,
           largeTenantRatio: issue.largeTenantRatio || 0
         }))
       })

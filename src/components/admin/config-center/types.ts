@@ -28,6 +28,11 @@ export interface TabConfig {
     queryParams: string;
     timeRule: DataSourceTimeRule;
   };
+  tenantSource: {
+    apiUrl: string;
+    apiKey: string;
+    queryParams: string;
+  };
   webhook: {
     url: string;
   };

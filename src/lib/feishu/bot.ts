@@ -976,7 +976,7 @@ export function createWeeklyReportCard(data: {
           .slice(0, DEFAULT_TOP_N)
           .map(
             (t, i) =>
-              `${i + 1}. ${t.tag3} (${t.tag2}) - ${t.count}次 (${t.pct}%)`
+              `${i + 1}. ${t.tag3}\n   所属模块：${t.tag2} | ${t.count}次 (${t.pct}%)`
           )
           .join('\n')}`
       }
@@ -1098,8 +1098,10 @@ export function createMonthlyReportCard(data: {
     const summary = topIssues
       .slice(0, DEFAULT_TOP_N)
       .map(
-        (issue, i) =>
-          `${i + 1}. ${issue.tag3} (${issue.tag2}) - ${issue.count}次，大租户占${Math.round(issue.largeTenantRatio * 100)}%`
+        (issue, i) => {
+          const ratio = issue.largeTenantRatio && !isNaN(issue.largeTenantRatio) ? issue.largeTenantRatio : 0
+          return `${i + 1}. ${issue.tag3 || '-'}\n   所属模块：${issue.tag2 || '-'} | ${issue.count || 0}次 | 大租户占${Math.round(ratio * 100)}%`
+        }
       )
       .join('\n')
     elements.push({
@@ -1121,7 +1123,7 @@ export function createMonthlyReportCard(data: {
       tag: 'div',
       text: {
         tag: 'lark_md',
-        content: `**� 本期标签自进化**\n合并标签：${mergeCount}组\n拆分建议：${splitCount}项`
+        content: `**🔄 本期标签自进化**\n合并标签：${mergeCount}组\n拆分建议：${splitCount}项`
       }
     },
     { tag: 'hr' }
@@ -1132,12 +1134,12 @@ export function createMonthlyReportCard(data: {
   if (topIssueUrl)
     quickLinks.push({
       tag: 'div',
-      text: { tag: 'lark_md', content: `� [Top问题表](${topIssueUrl})` }
+      text: { tag: 'lark_md', content: `📊 [Top问题表](${topIssueUrl})` }
     })
   if (documentUrl)
     quickLinks.push({
       tag: 'div',
-      text: { tag: 'lark_md', content: `� [会议文档](${documentUrl})` }
+      text: { tag: 'lark_md', content: `📄 [会议文档](${documentUrl})` }
     })
   if (dashboardUrl)
     quickLinks.push({

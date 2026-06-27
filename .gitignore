@@ -1,3 +1,56 @@
+# 依赖
 node_modules
+.pnp
+.pnp.js
+
+# 环境变量
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+
+# Next.js 构建产物
 .next
+out
+build
+dist
+
+# TypeScript 构建缓存
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# 测试产物
+test-results/
+playwright-report/
+playwright/.cache/
+tests/screenshots/
+
+# 编辑器 & IDE
+.vscode/
+.idea/
+.cursor/
+.claude/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 日志
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# 临时数据文件
+mock-feedbacks-*.json
+*.pyc
+
+# Vercel
+.vercel

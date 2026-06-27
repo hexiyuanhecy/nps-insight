@@ -10,8 +10,6 @@ import { ANALYSIS_FIELDS, TOP_ISSUES_FIELDS } from '../feishu/constants'
 
 /**
  * 公式同步类
- * 注意：Top问题表的统计字段（总反馈数、大租户反馈数等）已由飞书自动计算
- * 公式同步功能已停用，仅保留权重配置的读取功能
  */
 export class FormulaSync {
   private storage: StorageAdapter;
@@ -23,11 +21,40 @@ export class FormulaSync {
   }
 
   /**
-   * 执行公式同步（已停用）
-   * Top问题表的统计字段由飞书自动计算，无需手动同步公式
+   * 执行公式同步
+   * 在 Top 问题表中查找 compositeScore 字段的公式
    */
   async sync(): Promise<void> {
-    console.log('[公式同步] 公式同步功能已停用，Top问题表统计字段由飞书自动计算');
+    console.log('[公式同步] 开始公式同步');
+
+    try {
+      // 读取系统存储的公式
+      const systemFormula = await this.getSystemFormula();
+      console.log('[公式同步] 系统公式:', systemFormula);
+
+      // 读取多维表格中综合评分字段的公式
+      const tableFormula = await this.getTableFormula();
+      console.log('[公式同步] 表格公式:', tableFormula);
+
+      // 对比差异，以用户调整为准
+      if (tableFormula && tableFormula !== systemFormula) {
+        console.log('[公式同步] 发现差异，以表格公式为准');
+
+        // 更新系统存储的公式
+        await this.updateSystemFormula(tableFormula);
+
+        // 解析新公式，更新权重配置
+        const weights = this.parseFormula(tableFormula);
+        await this.updateWeights(weights);
+
+        console.log('[公式同步] 公式同步完成');
+      } else {
+        console.log('[公式同步] 公式一致，无需同步');
+      }
+    } catch (error) {
+      console.error('[公式同步] 同步失败:', error);
+      throw error;
+    }
   }
 
   /**

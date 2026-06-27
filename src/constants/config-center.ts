@@ -125,7 +125,11 @@ export const WEEK_DAYS = [
 
 export const TENANT_LEVELS = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'] as const;
 
-export const MOCK_LOG_URL = '/api/mock/logs?userId=demo&start=2025-01-01&end=2025-01-31';
+// Mock 反馈数据 API 地址
+export const MOCK_FEEDBACK_URL = '/api/mock/feedbacks';
+
+// Mock 日志平台链接模板（支持 {{userId}} / {{start}} / {{end}} 占位符）
+export const MOCK_LOG_URL = '/log-viewer?userId={{userId}}&start={{start}}&end={{end}}';
 
 export const CONFIG_TAB_META = [
   { key: 'feishu' as const, name: '飞书配置', desc: '飞书应用 / 通知群 / 多维表格 / 大租户' },
@@ -138,6 +142,7 @@ export function createDefaultConfig(): TabConfig {
     feishu: { appId: '', appSecret: '' },
     bitable: { mode: 'idle', appToken: '', url: '', status: 'unset' },
     dataSource: { apiUrl: '', apiKey: '', queryParams: '', timeRule: 'lastWeek' },
+    tenantSource: { apiUrl: '', apiKey: '', queryParams: '' },
     webhook: { url: '' },
     ai: { provider: 'agnesai', apiKey: '', baseUrl: '', model: 'agnes-2.0-flash', modelVersion: 'agnes-2.0-flash' },
     tag1: DEFAULT_TAG1,

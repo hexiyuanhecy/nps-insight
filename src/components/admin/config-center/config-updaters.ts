@@ -25,6 +25,14 @@ export function createConfigUpdaters(config: TabConfig | null, setConfig: SetCon
     setConfig({ ...config, dataSource: { ...config.dataSource, [field]: value } });
   };
 
+  const updateTenantSource = <K extends keyof TabConfig['tenantSource']>(
+    field: K,
+    value: TabConfig['tenantSource'][K],
+  ) => {
+    if (!config) return;
+    setConfig({ ...config, tenantSource: { ...config.tenantSource, [field]: value } });
+  };
+
   const updateWebhook = (url: string) => {
     if (!config) return;
     setConfig({ ...config, webhook: { url } });
@@ -95,6 +103,7 @@ export function createConfigUpdaters(config: TabConfig | null, setConfig: SetCon
     updateFeishu,
     updateBitable,
     updateDataSource,
+    updateTenantSource,
     updateWebhook,
     updateAI,
     updateTag1,

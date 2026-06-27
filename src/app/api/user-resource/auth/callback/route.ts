@@ -8,6 +8,8 @@ import { createUserResourceStore } from '@/lib/storage/user-resource-store';
 import { exchangeCodeForToken, getUserInfo } from '@/lib/feishu/user-auth';
 import { getCurrentTimestampSeconds } from '@/constants/app-constants';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);

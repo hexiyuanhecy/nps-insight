@@ -20,12 +20,14 @@ let appTokenCacheOwner: string | null = null;
 function buildEnvMapping(): Record<string, string> {
   return {
     feedback: process.env.BITABLE_FEEDBACK_TABLE_ID || process.env.BITABLE_TABLE_ID || '',
+    tags: process.env.BITABLE_TAGS_TABLE_ID || process.env.BITABLE_TABLE_ID_TAGS || '',
     tag1: process.env.BITABLE_TAG1_TABLE_ID || process.env.BITABLE_TAGS_TABLE_ID || process.env.BITABLE_TABLE_ID_TAGS || '',
     tag2: process.env.BITABLE_TAG2_TABLE_ID || process.env.BITABLE_TAGS_TABLE_ID || process.env.BITABLE_TABLE_ID_TAGS || '',
     tag3: process.env.BITABLE_TAG3_TABLE_ID || process.env.BITABLE_TAGS_TABLE_ID || process.env.BITABLE_TABLE_ID_TAGS || '',
     tenants: process.env.BITABLE_TENANTS_TABLE_ID || process.env.BITABLE_TABLE_ID_TENANTS || '',
     analysis: process.env.BITABLE_ANALYSIS_TABLE_ID || process.env.BITABLE_TABLE_ID_ANALYSIS || '',
     top_issues: process.env.BITABLE_ANALYSIS_TABLE_ID || process.env.BITABLE_TABLE_ID_ANALYSIS || '',
+    config: process.env.BITABLE_CONFIG_TABLE_ID || process.env.BITABLE_TABLE_ID_CONFIG || '',
   };
 }
 
@@ -158,17 +160,7 @@ async function getTableIdMappingAsync(): Promise<Record<string, string>> {
   const kvConfig = await getConfigFromKV();
 
   // 合并环境变量和 KV 配置，KV 配置优先
-  const envMapping = {
-    feedback: process.env.BITABLE_TABLE_ID || '',
-    tags: process.env.BITABLE_TABLE_ID_TAGS || '',
-    tag1: process.env.BITABLE_TABLE_ID_TAG1 || process.env.BITABLE_TABLE_ID_TAGS || '',
-    tag2: process.env.BITABLE_TABLE_ID_TAG2 || process.env.BITABLE_TABLE_ID_TAGS || '',
-    tag3: process.env.BITABLE_TABLE_ID_TAG3 || process.env.BITABLE_TABLE_ID_TAGS || '',
-    tenants: process.env.BITABLE_TABLE_ID_TENANTS || '',
-    analysis: process.env.BITABLE_TABLE_ID_ANALYSIS || '',
-    top_issues: process.env.BITABLE_TABLE_ID_ANALYSIS || '',
-    config: process.env.BITABLE_TABLE_ID_CONFIG || '',
-  };
+  const envMapping = buildEnvMapping();
 
   // KV 配置覆盖环境变量
   return {
@@ -202,17 +194,7 @@ function getTableIdMapping(): Record<string, string> {
     }
   }
 
-  return {
-    feedback: process.env.BITABLE_TABLE_ID || '',
-    tags: process.env.BITABLE_TABLE_ID_TAGS || '',
-    tag1: process.env.BITABLE_TABLE_ID_TAG1 || process.env.BITABLE_TABLE_ID_TAGS || '',
-    tag2: process.env.BITABLE_TABLE_ID_TAG2 || process.env.BITABLE_TABLE_ID_TAGS || '',
-    tag3: process.env.BITABLE_TABLE_ID_TAG3 || process.env.BITABLE_TABLE_ID_TAGS || '',
-    tenants: process.env.BITABLE_TABLE_ID_TENANTS || '',
-    analysis: process.env.BITABLE_TABLE_ID_ANALYSIS || '',
-    top_issues: process.env.BITABLE_TABLE_ID_ANALYSIS || '',
-    config: process.env.BITABLE_TABLE_ID_CONFIG || '',
-  };
+  return buildEnvMapping();
 }
 
 /** 根据表名获取table_id（优先异步 KV 配置） */

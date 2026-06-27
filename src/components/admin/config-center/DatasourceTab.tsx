@@ -1,4 +1,4 @@
-import { Calendar, Database, FileJson, Link, Upload } from 'lucide-react';
+import { Building, Calendar, Database, FileJson, Link, Upload } from 'lucide-react';
 import type { ConfigCenterController } from '@/components/admin/config-center/use-config-center';
 import {
   PrimaryButton,
@@ -8,7 +8,7 @@ import {
   SelectField,
   TextField,
 } from '@/components/admin/config-center/ui';
-import { MOCK_LOG_URL } from '@/constants/config-center';
+import { MOCK_FEEDBACK_URL, MOCK_LOG_URL } from '@/constants/config-center';
 
 interface DatasourceTabProps {
   ctrl: ConfigCenterController;
@@ -41,6 +41,26 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
             onChange={(v) => ctrl.updateDataSource('timeRule', v as typeof config.dataSource.timeRule)}
             disabled={disabled}
           />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => ctrl.updateDataSource('apiUrl', MOCK_FEEDBACK_URL)}
+              disabled={disabled}
+              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              使用 Mock 数据
+            </button>
+            <span className="text-xs text-slate-500">点击后将 Mock API 地址回填到上方输入框</span>
+          </div>
+        </div>
+      </section>
+
+      {/* 租户信息 - API */}
+      <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <SectionTitle icon={<Building className="h-5 w-5" />} title="租户信息 - API" desc="从租户系统拉取租户基础信息，用于大租户识别和分级" />
+        <div className="grid gap-4">
+          <TextField label="API 地址" value={config.tenantSource.apiUrl} onChange={(v) => ctrl.updateTenantSource('apiUrl', v)} placeholder="https://api.tenant.example.com/list" hint="含协议与路径" disabled={disabled} />
+          <SecretField label="API Key" value={config.tenantSource.apiKey} onChange={(v) => ctrl.updateTenantSource('apiKey', v)} saved={!!config.tenantSource.apiKey} placeholder="Bearer token" hint="需要鉴权时填写" disabled={disabled} />
+          <TextField label="查询参数（可选）" value={config.tenantSource.queryParams} onChange={(v) => ctrl.updateTenantSource('queryParams', v)} placeholder="status=active&page_size=100" hint="拼接到 URL 后面" disabled={disabled} />
         </div>
       </section>
 

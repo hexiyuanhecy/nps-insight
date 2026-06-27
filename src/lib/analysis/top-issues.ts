@@ -113,6 +113,7 @@ export class TopIssuesGenerator {
 
   /**
    * 写入 Top 问题表
+   * 新建时写入所有字段，更新时只更新非统计字段（统计字段由公式/自动计算）
    */
   async writeToTable(issues: TopIssue[]): Promise<void> {
     console.log('[Top问题] 写入 Top 问题表');
@@ -129,16 +130,25 @@ export class TopIssuesGenerator {
       }
     }
 
+    // 过滤掉"其他"分类（不是具体问题分类，且多选字段可能无此选项）
+    const validIssues = issues.filter((issue) => issue.tag2 !== '其他');
+    if (validIssues.length < issues.length) {
+      console.log(`[Top问题] 过滤掉 ${issues.length - validIssues.length} 条"其他"分类问题`);
+    }
+
     const recordsToCreate: Array<{ fields: Record<string, unknown> }> = [];
     const recordsToUpdate: Array<{ record_id: string; fields: Record<string, unknown> }> = [];
 
-    for (const issue of issues) {
+    for (const issue of validIssues) {
       const existing = existingMap.get(issue.tag2);
+      const issueAny = issue as any;
 
       if (existing) {
+        // 更新：只更新手动维护的字段，统计字段由公式/自动计算
         recordsToUpdate.push({
           record_id: existing.record_id,
           fields: {
+            [TOP_ISSUES_FIELDS.INDEX]: issue.index,
             [TOP_ISSUES_FIELDS.MANUAL_PRIORITY]: issue.manualPriority,
             [TOP_ISSUES_FIELDS.OWNER]: issue.owner,
             [TOP_ISSUES_FIELDS.RESOLUTION]: issue.resolution,
@@ -147,17 +157,35 @@ export class TopIssuesGenerator {
           },
         });
       } else {
-        recordsToCreate.push({
-          fields: {
-            [TOP_ISSUES_FIELDS.INDEX]: issue.index,
-            [TOP_ISSUES_FIELDS.TAG2]: issue.tag2,
-            [TOP_ISSUES_FIELDS.MANUAL_PRIORITY]: issue.manualPriority,
-            [TOP_ISSUES_FIELDS.OWNER]: issue.owner,
-            [TOP_ISSUES_FIELDS.RESOLUTION]: issue.resolution,
-            [TOP_ISSUES_FIELDS.STATUS]: issue.status,
-            [TOP_ISSUES_FIELDS.ITERATION_PERIOD]: issue.iterationPeriod,
-          },
-        });
+        // 新建：写入所有字段
+        const fields: Record<string, unknown> = {
+          [TOP_ISSUES_FIELDS.INDEX]: issue.index,
+          [TOP_ISSUES_FIELDS.TAG2]: [issue.tag2],
+          [TOP_ISSUES_FIELDS.MANUAL_PRIORITY]: issue.manualPriority,
+          [TOP_ISSUES_FIELDS.OWNER]: issue.owner,
+          [TOP_ISSUES_FIELDS.RESOLUTION]: issue.resolution,
+          [TOP_ISSUES_FIELDS.STATUS]: issue.status,
+          [TOP_ISSUES_FIELDS.ITERATION_PERIOD]: issue.iterationPeriod,
+        };
+        
+        // 如果有统计数据也一并写入（如果表格支持的话）
+        if (issueAny.totalCount !== undefined) {
+          fields[TOP_ISSUES_FIELDS.TOTAL_COUNT] = issueAny.totalCount;
+        }
+        if (issueAny.a4Count !== undefined) {
+          fields[TOP_ISSUES_FIELDS.A4_COUNT] = issueAny.a4Count;
+        }
+        if (issueAny.a5Count !== undefined) {
+          fields[TOP_ISSUES_FIELDS.A5_COUNT] = issueAny.a5Count;
+        }
+        if (issueAny.a6Count !== undefined) {
+          fields[TOP_ISSUES_FIELDS.A6_COUNT] = issueAny.a6Count;
+        }
+        if (issueAny.largeTenantCount !== undefined) {
+          fields[TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT] = issueAny.largeTenantCount;
+        }
+
+        recordsToCreate.push({ fields });
       }
     }
 
@@ -210,23 +238,36 @@ export class TopIssuesGenerator {
 
   /**
    * 从反馈记录中获取标签名称
-   * 通过关联字段的 recordId 查找对应的标签名称
+   * 支持两种格式：
+   * 1. 直接存储标签名称（字符串/字符串数组）
+   * 2. 存储关联 recordId（需要通过映射表查找名称）
    */
   private getTagNameFromRecordId(recordIds: unknown, tagType: 'tag1' | 'tag2' | 'tag3'): string {
-    const map = tagType === 'tag1' ? this.tagMappings.tag1Map
+    const recordIdMap = tagType === 'tag1' ? this.tagMappings.tag1Map
       : tagType === 'tag2' ? this.tagMappings.tag2Map
       : this.tagMappings.tag3Map;
+    
+    // 建立 名称 -> 名称 的映射（用于快速判断是否是已知标签）
+    const nameSet = new Set(recordIdMap.values());
 
     if (Array.isArray(recordIds)) {
       if (recordIds.length === 0) return '其他';
-      const firstId = String(recordIds[0]);
-      return map.get(firstId) || '其他';
+      const firstVal = String(recordIds[0]);
+      // 如果是已知名称，直接返回
+      if (nameSet.has(firstVal)) return firstVal;
+      // 如果是 recordId，查找名称
+      const name = recordIdMap.get(firstVal);
+      return name || firstVal || '其他';
     }
 
-    const recordId = String(recordIds || '');
-    if (!recordId) return '其他';
-
-    return map.get(recordId) || '其他';
+    const val = String(recordIds || '');
+    if (!val) return '其他';
+    
+    // 如果是已知名称，直接返回
+    if (nameSet.has(val)) return val;
+    // 如果是 recordId，查找名称
+    const name = recordIdMap.get(val);
+    return name || val;
   }
 
   /**
@@ -285,12 +326,35 @@ export class TopIssuesGenerator {
   }
 
   /**
-   * 计算综合评分
+   * 计算综合评分并排序
+   * 评分公式：count权重 * 数量归一化 + largeTenant权重 * 大租户占比 + quality权重 * 质量分（低NPS=高质量问题）
    */
   private calculateScores(groups: Map<string, IssueGroup>): TopIssue[] {
-    const issues: TopIssue[] = [];
+    const issues: Array<TopIssue & { totalCount: number; largeTenantRatio: number; avgScore: number; score: number }> = [];
+
+    // 找出最大数量用于归一化
+    let maxCount = 1;
+    for (const group of Array.from(groups.values())) {
+      if (group.totalCount > maxCount) maxCount = group.totalCount;
+    }
 
     Array.from(groups.entries()).forEach(([_, group]) => {
+      const largeTenantRatio = group.totalCount > 0 ? group.largeTenantCount / group.totalCount : 0;
+      const avgScore = group.totalCount > 0 ? group.totalScore / group.totalCount : 0;
+      
+      // 数量归一化 (0-1)
+      const countScore = group.totalCount / maxCount;
+      // 大租户占比 (0-1)
+      const largeTenantScore = largeTenantRatio;
+      // 质量分：NPS越低问题越严重，质量分越高 (0-1)
+      const qualityScore = Math.max(0, Math.min(1, (10 - avgScore) / 10));
+
+      // 综合评分
+      const score =
+        this.weights.count * countScore +
+        this.weights.largeTenant * largeTenantScore +
+        this.weights.quality * qualityScore;
+
       issues.push({
         index: '',
         tag2: group.tag2,
@@ -299,7 +363,19 @@ export class TopIssuesGenerator {
         resolution: '',
         status: '待讨论',
         iterationPeriod: '待定',
+        totalCount: group.totalCount,
+        largeTenantRatio,
+        avgScore,
+        score,
       });
+    });
+
+    // 按综合评分降序排序
+    issues.sort((a, b) => b.score - a.score);
+
+    // 填充排名 index
+    issues.forEach((issue, idx) => {
+      issue.index = String(idx + 1);
     });
 
     return issues;

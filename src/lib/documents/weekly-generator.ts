@@ -8,7 +8,8 @@ import { TABLE_NAMES, FEEDBACK_FIELDS, TOP_ISSUES_FIELDS } from '@/lib/feishu/co
 import { AdapterFactory, getDefaultDocument } from '@/lib/adapter-factory';
 import { DocumentAdapter } from '@/lib/document/base-document';
 import { createUserResourceStore } from '@/lib/storage/user-resource-store';
-import { DEFAULT_PAGE_SIZE, DEFAULT_TOP_N } from '@/constants/app-constants';
+import { DEFAULT_PAGE_SIZE, DEFAULT_TOP_N, getCurrentTimestampSeconds } from '@/constants/app-constants';
+import { refreshAccessToken } from '@/lib/feishu/user-auth';
 
 /**
  * 生成周报
@@ -89,21 +90,50 @@ export async function generateWeeklyReport(weekOffset: number = 0): Promise<{
     const userResourceStore = createUserResourceStore();
     const userResource = await userResourceStore.get();
     const reportFolderToken = userResource?.reportFolderToken;
-    const userAccessToken = userResource?.userAccessToken;
-    const userRefreshToken = userResource?.refreshToken;
-    const tokenExpiresAt = userResource?.tokenExpiresAt;
-
+    
+    // 获取有效的用户 access_token（检查过期）
+    let userAccessToken: string | null;
+    let userRefreshToken = userResource?.refreshToken;
+    let tokenExpiresAt = userResource?.tokenExpiresAt;
+    
+    // 尝试调用 getValidAccessToken（如果存在）
+    if (userResourceStore.getValidAccessToken) {
+      userAccessToken = await userResourceStore.getValidAccessToken();
+    } else {
+      // 回退到直接使用 userAccessToken（不检查过期）
+      userAccessToken = userResource?.userAccessToken || null;
+    }
+    
+    // 如果 token 无效（过期或即将过期），尝试刷新
+    if (!userAccessToken && userRefreshToken) {
+      console.log('[周报] 用户Token无效，尝试刷新...');
+      try {
+        const newToken = await refreshAccessToken(userRefreshToken);
+        if (newToken) {
+          userAccessToken = newToken.access_token;
+          tokenExpiresAt = getCurrentTimestampSeconds() + newToken.expires_in;
+          console.log('[周报] Token刷新成功');
+        }
+      } catch (refreshErr) {
+        console.error('[周报] Token刷新失败:', refreshErr);
+      }
+    }
+    
     // 根据用户是否授权，选择文档适配器
     let document: DocumentAdapter;
+    
     if (userAccessToken) {
-      console.log('[周报] 使用用户身份创建文档');
-      document = AdapterFactory.createDocument('feishu', {
-        userAccessToken,
-        userRefreshToken,
-        tokenExpiresAt,
-      });
+      try {
+        document = AdapterFactory.createDocument('feishu', {
+          userAccessToken,
+          userRefreshToken,
+          tokenExpiresAt,
+        });
+      } catch (createErr) {
+        console.warn('[周报] 用户身份创建文档失败，使用应用身份:', createErr instanceof Error ? createErr.message : '未知错误');
+        document = getDefaultDocument();
+      }
     } else {
-      console.log('[周报] 使用应用身份创建文档');
       document = getDefaultDocument();
     }
 
@@ -122,21 +152,18 @@ export async function generateWeeklyReport(weekOffset: number = 0): Promise<{
     });
 
     let documentUrl: string | undefined;
+    let docError: string | undefined;
+    
     try {
-      if (reportFolderToken) {
-        console.log('[周报] 使用周报归档文件夹:', reportFolderToken);
-      } else {
-        console.warn('[周报] 未配置周报归档文件夹，将创建在默认位置');
-      }
-      
       const doc = await document.create(weekTitle, docContent, reportFolderToken);
       documentUrl = doc.url;
-    } catch (docError) {
-      console.error('[周报] 生成文档失败', docError);
+    } catch (err) {
+      docError = err instanceof Error ? err.message : '未知错误';
+      console.error('[周报] 生成文档失败:', docError);
     }
 
     return {
-      success: true,
+      success: !docError,
       weekNumber: currentWeek,
       year,
       startDate,
@@ -145,6 +172,7 @@ export async function generateWeeklyReport(weekOffset: number = 0): Promise<{
       npsScore,
       topIssues,
       documentUrl,
+      error: docError,
     };
   } catch (error) {
     return {

@@ -39,13 +39,13 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
    */
   private async getAccessToken(): Promise<string> {
     if (this.userAccessToken) {
-      // 如果有 refreshToken 且 token 即将过期，先刷新
+      // 如果有 refreshToken 且 token 即将过期或已过期，先刷新
       if (this.userRefreshToken && this.tokenExpiresAt) {
         const now = getCurrentTimestampSeconds();
         const remainingSeconds = this.tokenExpiresAt - now;
 
         if (remainingSeconds < 600) {
-          console.log('[飞书文档] 用户 token 即将过期，先刷新...');
+          console.log('[飞书文档] 用户 token 即将过期或已过期，先刷新...');
           try {
             const newToken = await refreshAccessToken(this.userRefreshToken);
             console.log('[飞书文档] 用户 token 刷新成功');
@@ -58,8 +58,9 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
             }
             return newToken.access_token;
           } catch (refreshErr) {
-            console.warn('[飞书文档] 用户 token 刷新失败，使用现有 token:', refreshErr instanceof Error ? refreshErr.message : '未知错误');
-            return this.userAccessToken;
+            console.error('[飞书文档] 用户 token 刷新失败:', refreshErr instanceof Error ? refreshErr.message : '未知错误');
+            // 刷新失败时，不返回过期 token，而是抛出异常让调用方知道需要重新授权
+            throw new Error('USER_TOKEN_EXPIRED_AND_REFRESH_FAILED');
           }
         }
       }
@@ -101,11 +102,6 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
   async create(title: string, content: string, folderToken?: string): Promise<{ documentId: string; url: string }> {
     const token = await this.getAccessToken();
     
-    console.log(`[飞书文档] 创建文档: ${title}`);
-    if (folderToken) {
-      console.log(`[飞书文档] 创建位置: 文件夹 ${folderToken}`);
-    }
-    
     // 构建请求体
     const body: Record<string, any> = { title };
     if (folderToken) {
@@ -131,36 +127,62 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
     
     // 写入内容
     if (content) {
-      await this.append(documentId, content, 'bottom');
+      // 需要先获取文档的 root block ID
+      const rootBlockId = await this.getDocumentRootBlockId(documentId, token);
+      await this.appendBlocks(documentId, rootBlockId, content, 'bottom', token);
     }
     
     const url = `https://feishu.cn/docx/${documentId}`;
-    console.log(`[飞书文档] 创建成功: ${url}`);
     return { documentId, url };
   }
 
   /**
-   * 追加内容到文档
+   * 获取文档的 root block ID
    */
-  async append(
+  private async getDocumentRootBlockId(documentId: string, token: string): Promise<string> {
+    const response = await fetch(
+      `${DOCX_API_BASE}/documents/${documentId}/blocks`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    
+    const data = await response.json();
+    if (data.code !== 0) {
+      throw new Error(`获取文档块失败: ${data.msg}`);
+    }
+    
+    // 返回根 block ID - 飞书文档的根block_id就是document_id
+    return documentId;
+  }
+
+  /**
+   * 追加内容到文档（内部方法）
+   */
+  private async appendBlocks(
     documentId: string,
+    blockId: string,
     content: string,
-    position: 'top' | 'bottom' = 'top'
+    position: 'top' | 'bottom' = 'top',
+    token?: string
   ): Promise<void> {
-    const token = await this.getAccessToken();
+    const accessToken = token || await this.getAccessToken();
     
     // 将 Markdown 转换为飞书文档 Block
     const blocks = this.parseMarkdownToBlocks(content);
     
     const index = position === 'top' ? 0 : -1;
     
+    // 注意：飞书文档 API 端点是 /blocks/{block_id}/children
     const response = await fetch(
-      `${DOCX_API_BASE}/documents/${documentId}/blocks/${documentId}/children/batch_create`,
+      `${DOCX_API_BASE}/documents/${documentId}/blocks/${blockId}/children`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           children: blocks,
@@ -177,17 +199,33 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
   }
 
   /**
+   * 追加内容到文档
+   */
+  async append(
+    documentId: string,
+    content: string,
+    position: 'top' | 'bottom' = 'top'
+  ): Promise<void> {
+    const token = await this.getAccessToken();
+    const rootBlockId = await this.getDocumentRootBlockId(documentId, token);
+    await this.appendBlocks(documentId, rootBlockId, content, position, token);
+  }
+
+  /**
    * 更新文档内容
    */
   async update(documentId: string, content: string): Promise<void> {
     const token = await this.getAccessToken();
+    
+    // 获取文档根 Block ID
+    const rootBlockId = await this.getDocumentRootBlockId(documentId, token);
     
     // 获取文档根 Block
     const blocks = this.parseMarkdownToBlocks(content);
     
     // 更新文档内容（替换所有内容）
     const response = await fetch(
-      `${DOCX_API_BASE}/documents/${documentId}/blocks/${documentId}/children/batch_update`,
+      `${DOCX_API_BASE}/documents/${documentId}/blocks/${rootBlockId}/children/batch_update`,
       {
         method: 'PUT',
         headers: {
@@ -213,8 +251,11 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
   async getContent(documentId: string): Promise<string> {
     const token = await this.getAccessToken();
     
+    // 获取文档根 Block ID
+    const rootBlockId = await this.getDocumentRootBlockId(documentId, token);
+    
     const response = await fetch(
-      `${DOCX_API_BASE}/documents/${documentId}/blocks/${documentId}/children`,
+      `${DOCX_API_BASE}/documents/${documentId}/blocks/${rootBlockId}/children`,
       {
         headers: {
           'Content-Type': 'application/json',
@@ -254,50 +295,82 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
 
   /**
    * 将 Markdown 转换为飞书文档 Block
+   * 飞书文档 API v1 Block 格式规范：
+   * - block_type 2: text 普通文本
+   * - block_type 3: heading1 一级标题
+   * - block_type 4: heading2 二级标题
+   * - block_type 5: heading3 三级标题
+   * - block_type 12: bullet 无序列表
+   * - block_type 22: divider 分割线
    */
   private parseMarkdownToBlocks(markdown: string): any[] {
     const blocks: any[] = [];
     const lines = markdown.split('\n');
-    
+
+    // 构建文本元素的辅助函数
+    const buildTextElements = (content: string) => [
+      {
+        text_run: {
+          content,
+        },
+      },
+    ];
+
     for (const line of lines) {
-      if (line.startsWith('## ')) {
-        // 标题2
+      if (line.startsWith('### ')) {
+        // 三级标题
         blocks.push({
-          block_type: 2,
+          block_type: 5,
+          heading3: {
+            elements: buildTextElements(line.replace('### ', '')),
+            style: {},
+          },
+        });
+      } else if (line.startsWith('## ')) {
+        // 二级标题
+        blocks.push({
+          block_type: 4,
           heading2: {
-            text: [{ text: line.replace('## ', '') }],
+            elements: buildTextElements(line.replace('## ', '')),
+            style: {},
           },
         });
       } else if (line.startsWith('# ')) {
-        // 标题1
+        // 一级标题
         blocks.push({
-          block_type: 1,
+          block_type: 3,
           heading1: {
-            text: [{ text: line.replace('# ', '') }],
+            elements: buildTextElements(line.replace('# ', '')),
+            style: {},
           },
         });
-      } else if (line.startsWith('- ')) {
+      } else if (line.startsWith('- ') || line.startsWith('* ')) {
         // 无序列表
+        const content = line.startsWith('- ')
+          ? line.replace('- ', '')
+          : line.replace('* ', '');
         blocks.push({
-          block_type: 4,
+          block_type: 12,
           bullet: {
-            text: [{ text: line.replace('- ', '') }],
+            elements: buildTextElements(content),
+            style: {},
           },
         });
       } else if (line.trim() === '---') {
         // 分割线
-        blocks.push({ block_type: 14, divider: {} });
+        blocks.push({ block_type: 22, divider: {} });
       } else if (line.trim()) {
         // 普通文本
         blocks.push({
           block_type: 2,
           text: {
-            text: [{ text: line }],
+            elements: buildTextElements(line),
+            style: {},
           },
         });
       }
     }
-    
+
     return blocks;
   }
 
@@ -306,27 +379,37 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
    */
   private parseBlocksToMarkdown(blocks: any[]): string {
     const lines: string[] = [];
-    
+
+    // 从 elements 中提取文本内容的辅助函数
+    const extractText = (elements: any[]): string => {
+      if (!elements || elements.length === 0) return '';
+      return elements
+        .map((el) => el.text_run?.content || '')
+        .join('');
+    };
+
     for (const block of blocks) {
-      if (block.block_type === 1) {
-        // 标题1
-        lines.push(`# ${block.heading1?.text?.[0]?.text || ''}`);
-      } else if (block.block_type === 2) {
-        // 标题2 或普通文本
-        if (block.heading2) {
-          lines.push(`## ${block.heading2?.text?.[0]?.text || ''}`);
-        } else if (block.text) {
-          lines.push(block.text?.text?.[0]?.text || '');
-        }
-      } else if (block.block_type === 4) {
+      if (block.block_type === 3 && block.heading1) {
+        // 一级标题
+        lines.push(`# ${extractText(block.heading1.elements)}`);
+      } else if (block.block_type === 4 && block.heading2) {
+        // 二级标题
+        lines.push(`## ${extractText(block.heading2.elements)}`);
+      } else if (block.block_type === 5 && block.heading3) {
+        // 三级标题
+        lines.push(`### ${extractText(block.heading3.elements)}`);
+      } else if (block.block_type === 12 && block.bullet) {
         // 无序列表
-        lines.push(`- ${block.bullet?.text?.[0]?.text || ''}`);
-      } else if (block.block_type === 14) {
+        lines.push(`- ${extractText(block.bullet.elements)}`);
+      } else if (block.block_type === 22 && block.divider) {
         // 分割线
         lines.push('---');
+      } else if (block.block_type === 2 && block.text) {
+        // 普通文本
+        lines.push(extractText(block.text.elements));
       }
     }
-    
+
     return lines.join('\n');
   }
 }

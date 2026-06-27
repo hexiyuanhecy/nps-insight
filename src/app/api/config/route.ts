@@ -112,6 +112,13 @@ function buildV3Config(): any {
     timeRule: (process.env.DATA_SOURCE_TIME_RULE as 'lastWeek' | 'lastMonth' | 'custom') || 'lastWeek',
   };
 
+  // 3.5 租户信息数据源
+  const tenantSource = {
+    apiUrl: process.env.TENANT_SOURCE_API_URL || '',
+    apiKey: process.env.TENANT_SOURCE_API_KEY || '',
+    queryParams: process.env.TENANT_SOURCE_QUERY_PARAMS || '',
+  };
+
   // 4. Webhook
   const webhook = {
     url: '/api/webhook/feelgood',
@@ -211,6 +218,7 @@ function buildV3Config(): any {
     feishu,
     bitable,
     dataSource,
+    tenantSource,
     webhook,
     ai,
     tag1,
@@ -271,6 +279,11 @@ export async function GET(request: NextRequest) {
       queryParams: envConfig.DATA_SOURCE_QUERY_PARAMS || process.env.DATA_SOURCE_QUERY_PARAMS || '{ "start": "{{start_unix}}", "end": "{{end_unix}}" }',
       timeRule: (envConfig.DATA_SOURCE_TIME_RULE || process.env.DATA_SOURCE_TIME_RULE || 'lastWeek') as 'lastWeek' | 'lastMonth' | 'custom',
     };
+    const tenantSourceConfig = {
+      apiUrl: envConfig.TENANT_SOURCE_API_URL || process.env.TENANT_SOURCE_API_URL || '',
+      apiKey: envConfig.TENANT_SOURCE_API_KEY || process.env.TENANT_SOURCE_API_KEY || '',
+      queryParams: envConfig.TENANT_SOURCE_QUERY_PARAMS || process.env.TENANT_SOURCE_QUERY_PARAMS || '',
+    };
     const aiConfig = {
       provider: (envConfig.AGNESAI_PROVIDER || process.env.AGNESAI_PROVIDER || 'agnesai') as 'agnesai' | 'custom',
       apiKey: envConfig.AGNESAI_API_KEY || process.env.AGNESAI_API_KEY || '',
@@ -309,6 +322,7 @@ export async function GET(request: NextRequest) {
       feishu: feishuConfig,
       bitable: bitableConfig,
       dataSource: dataSourceConfig,
+      tenantSource: tenantSourceConfig,
       ai: aiConfig,
       tagging: taggingConfig,
       schedule: scheduleConfig,
@@ -344,6 +358,7 @@ export async function GET(request: NextRequest) {
         // 敏感字段以空字符串或标记返回
         feishu: { ...config.feishu, appSecret: config.feishu.appSecret ? '__SET__' : '' },
         dataSource: { ...config.dataSource, apiKey: config.dataSource.apiKey ? '__SET__' : '' },
+        tenantSource: { ...config.tenantSource, apiKey: config.tenantSource.apiKey ? '__SET__' : '' },
         ai: { ...config.ai, apiKey: config.ai.apiKey ? '__SET__' : '' },
       },
     });
@@ -462,6 +477,19 @@ async function saveConfigV3(config: any) {
       }
     }
 
+    // 3.5 租户信息数据源
+    if (config.tenantSource) {
+      if (config.tenantSource.apiUrl) {
+        notifyConfigChange('tenantSource', 'apiUrl', config.tenantSource.apiUrl);
+      }
+      if (config.tenantSource.apiKey && config.tenantSource.apiKey !== '__SET__') {
+        notifyConfigChange('tenantSource', 'apiKey', config.tenantSource.apiKey);
+      }
+      if (config.tenantSource.queryParams) {
+        notifyConfigChange('tenantSource', 'queryParams', config.tenantSource.queryParams);
+      }
+    }
+
     // 4. AI
     if (config.ai) {
       notifyConfigChange('ai', 'provider', config.ai.provider || 'agnesai');
@@ -564,6 +592,11 @@ async function saveConfigV3(config: any) {
   if (config.dataSource?.queryParams) envVars.DATA_SOURCE_QUERY_PARAMS = config.dataSource.queryParams;
   if (config.dataSource?.timeRule) envVars.DATA_SOURCE_TIME_RULE = config.dataSource.timeRule;
 
+  if (config.tenantSource?.apiUrl) envVars.TENANT_SOURCE_API_URL = config.tenantSource.apiUrl;
+  if (config.tenantSource?.apiKey && config.tenantSource.apiKey !== '__SET__')
+    envVars.TENANT_SOURCE_API_KEY = config.tenantSource.apiKey;
+  if (config.tenantSource?.queryParams) envVars.TENANT_SOURCE_QUERY_PARAMS = config.tenantSource.queryParams;
+
   if (config.ai?.provider) envVars.AGNESAI_PROVIDER = config.ai.provider;
   if (config.ai?.apiKey && config.ai.apiKey !== '__SET__') envVars.AGNESAI_API_KEY = config.ai.apiKey;
   if (config.ai?.baseUrl) envVars.AGNESAI_BASE_URL = config.ai.baseUrl;
@@ -653,6 +686,7 @@ async function saveConfigV3(config: any) {
       feishu: config.feishu ? { ...currentConfig.feishu, ...config.feishu } : currentConfig.feishu,
       bitable: config.bitable ? { ...currentConfig.bitable, ...config.bitable } : currentConfig.bitable,
       dataSource: config.dataSource ? { ...currentConfig.dataSource, ...config.dataSource } : currentConfig.dataSource,
+      tenantSource: config.tenantSource ? { ...currentConfig.tenantSource, ...config.tenantSource } : currentConfig.tenantSource,
       ai: config.ai ? { ...currentConfig.ai, ...config.ai } : currentConfig.ai,
       tag1: config.tag1 || currentConfig.tag1,
       tag2Init: config.tag2Init !== undefined ? config.tag2Init : currentConfig.tag2Init,

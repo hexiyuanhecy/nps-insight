@@ -217,7 +217,6 @@ export function useConfigActions({
     if (!config) return;
     try {
       setTabLoading(tabKey, true);
-      console.log('==============================>hxy22222 == ', 22222);
       const result = await retagHistoryApi(config);
       pushToast(result.success ? '已启动重新打标' : '失败: ' + result.error, result.success ? 'success' : 'error');
     } catch (error) {
