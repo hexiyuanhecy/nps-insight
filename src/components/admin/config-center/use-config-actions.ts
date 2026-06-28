@@ -86,9 +86,39 @@ export function useConfigActions({
         throw new Error(result.error || '保存失败');
       }
       // 保存成功后重新加载配置，确保本地状态与后端一致
+      const prevConfig = config;
       await loadConfig();
+      // ponytail: 敏感字段后端返回__SET__，需要用保存前的值覆盖
+      // 避免用户刚输入的内容"消失"
+      if (prevConfig && config) {
+        const sensitiveFields: Array<[string, string]> = [
+          ['feishu', 'appSecret'],
+          ['dataSource', 'apiKey'],
+          ['tenantSource', 'apiKey'],
+          ['ai', 'apiKey'],
+        ];
+        let needsUpdate = false;
+        const mergedConfig = { ...config } as Record<string, any>;
+        for (const [section, field] of sensitiveFields) {
+          const prevSection = (prevConfig as Record<string, any>)[section];
+          const currSection = (config as Record<string, any>)[section];
+          const prevValue = prevSection?.[field];
+          const currValue = currSection?.[field];
+          // 如果后端返回__SET__，但之前有实际值，则用之前的值
+          if (currValue === '__SET__' && prevValue && prevValue !== '__SET__') {
+            if (!mergedConfig[section]) {
+              mergedConfig[section] = { ...currSection };
+            }
+            mergedConfig[section][field] = prevValue;
+            needsUpdate = true;
+          }
+        }
+        if (needsUpdate) {
+          setConfig(mergedConfig as TabConfig);
+        }
+      }
     },
-    [loadConfig],
+    [config, loadConfig, setConfig],
   );
 
   const saveSectionConfig = useCallback(
