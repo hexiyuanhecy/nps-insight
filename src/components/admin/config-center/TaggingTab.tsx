@@ -63,7 +63,22 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
 
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700">模型版本</label>
-            <AutoSaveField fieldPath="ai.modelVersion" value={config.ai.modelVersion || activeAI.defaultVersion} onSave={ctrl.savePartial}>
+            <AutoSaveField 
+              fieldPath="ai" 
+              value={config.ai} 
+              onSave={ctrl.savePartial}
+              getValueFromDOM={() => {
+                // ponytail: 从select读取modelVersion，返回包含modelVersion和model的ai对象
+                const select = document.querySelector('[data-section="ai-model"] select') as HTMLSelectElement | null;
+                if (!select) return undefined;
+                const modelVersion = select.value;
+                return {
+                  ...config.ai,
+                  modelVersion,
+                  model: modelVersion,
+                };
+              }}
+            >
               <select
                 value={config.ai.modelVersion || activeAI.defaultVersion}
                 onChange={(e) => {
