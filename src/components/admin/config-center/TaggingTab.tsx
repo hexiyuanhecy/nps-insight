@@ -232,9 +232,18 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
       {/* 置信度阈值 */}
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <SectionTitle icon={<Key className="h-5 w-5" />} title="置信度阈值" desc="低于阈值的打标结果会标记为「待审核」" />
-        <AutoSaveField fieldPath="tagging.confidenceThreshold" value={config.tagging.confidenceThreshold} onSave={ctrl.savePartial}>
+        <AutoSaveField
+          fieldPath="tagging.confidenceThreshold"
+          value={config.tagging.confidenceThreshold}
+          onSave={ctrl.savePartial}
+          getValueFromDOM={() => {
+            const input = document.getElementById('confidence-threshold-input');
+            return input ? parseFloat((input as HTMLInputElement).value) : undefined;
+          }}
+        >
           <div className="flex flex-wrap items-center gap-3">
             <input
+              id="confidence-threshold-input"
               type="number"
               step="0.01"
               min={0}
