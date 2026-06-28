@@ -22,13 +22,27 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
   return (
     <div className="space-y-6">
       {/* 反馈来源 - API */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
+      <section data-section="feedback-api" className="rounded-xl border border-slate-200 bg-white p-6">
         <SectionTitle icon={<Database className="h-5 w-5" />} title="反馈来源 - API" desc="定期从 Feelgood 或其他数据源拉取反馈" />
         <div className="grid gap-4">
           <AutoSaveField fieldPath="dataSource.apiUrl" value={config.dataSource.apiUrl} onSave={ctrl.savePartial}>
             <TextField label="API 地址" value={config.dataSource.apiUrl} onChange={(v) => ctrl.updateDataSource('apiUrl', v)} placeholder="https://api.feelgood.example.com/feedback" hint="含协议与路径" />
           </AutoSaveField>
-          <AutoSaveField fieldPath="dataSource.apiKey" value={config.dataSource.apiKey} onSave={ctrl.savePartial}>
+          <AutoSaveField
+            fieldPath="dataSource.apiKey"
+            value={config.dataSource.apiKey}
+            onSave={ctrl.savePartial}
+            getValueFromDOM={() => {
+              const section = document.querySelector('[data-section="feedback-api"]');
+              if (!section) return undefined;
+              const input = section.querySelector('input[type="password"]') as HTMLInputElement;
+              if (!input) return undefined;
+              if (input.value === '' && input.placeholder.includes('已配置')) {
+                return '__SET__';
+              }
+              return input.value;
+            }}
+          >
             <SecretField label="API Key" value={config.dataSource.apiKey} onChange={(v) => ctrl.updateDataSource('apiKey', v)} saved={!!config.dataSource.apiKey} placeholder="Bearer token" hint="需要鉴权时填写" mode="auto" />
           </AutoSaveField>
           <AutoSaveField fieldPath="dataSource.queryParams" value={config.dataSource.queryParams} onSave={ctrl.savePartial}>
@@ -59,13 +73,27 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
       </section>
 
       {/* 租户信息 - API */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
+      <section data-section="tenant-api" className="rounded-xl border border-slate-200 bg-white p-6">
         <SectionTitle icon={<Building className="h-5 w-5" />} title="租户信息 - API" desc="从租户系统拉取租户基础信息，用于大租户识别和分级" />
         <div className="grid gap-4">
           <AutoSaveField fieldPath="tenantSource.apiUrl" value={config.tenantSource.apiUrl} onSave={ctrl.savePartial}>
             <TextField label="API 地址" value={config.tenantSource.apiUrl} onChange={(v) => ctrl.updateTenantSource('apiUrl', v)} placeholder="https://api.tenant.example.com/list" hint="含协议与路径" />
           </AutoSaveField>
-          <AutoSaveField fieldPath="tenantSource.apiKey" value={config.tenantSource.apiKey} onSave={ctrl.savePartial}>
+          <AutoSaveField
+            fieldPath="tenantSource.apiKey"
+            value={config.tenantSource.apiKey}
+            onSave={ctrl.savePartial}
+            getValueFromDOM={() => {
+              const section = document.querySelector('[data-section="tenant-api"]');
+              if (!section) return undefined;
+              const input = section.querySelector('input[type="password"]') as HTMLInputElement;
+              if (!input) return undefined;
+              if (input.value === '' && input.placeholder.includes('已配置')) {
+                return '__SET__';
+              }
+              return input.value;
+            }}
+          >
             <SecretField label="API Key" value={config.tenantSource.apiKey} onChange={(v) => ctrl.updateTenantSource('apiKey', v)} saved={!!config.tenantSource.apiKey} placeholder="Bearer token" hint="需要鉴权时填写" mode="auto" />
           </AutoSaveField>
           <AutoSaveField fieldPath="tenantSource.queryParams" value={config.tenantSource.queryParams} onSave={ctrl.savePartial}>

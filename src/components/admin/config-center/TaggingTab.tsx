@@ -41,7 +41,7 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
   return (
     <div className="space-y-6">
       {/* AI 模型选择：热门模型下拉 + 版本下拉 */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
+      <section data-section="ai-model" className="rounded-xl border border-slate-200 bg-white p-6">
         <SectionTitle icon={<Cpu className="h-5 w-5" />} title="AI 模型选择" desc="用于自动打标、生成分析报告等智能功能" />
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -86,7 +86,21 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
               <TextField label="自定义 API 地址" value={config.ai.baseUrl} onChange={(v) => ctrl.updateAI('baseUrl', v)} placeholder="https://api.example.com/v1" hint="OpenAI 兼容接口" />
             </AutoSaveField>
           )}
-          <AutoSaveField fieldPath="ai.apiKey" value={config.ai.apiKey} onSave={ctrl.savePartial}>
+          <AutoSaveField
+            fieldPath="ai.apiKey"
+            value={config.ai.apiKey}
+            onSave={ctrl.savePartial}
+            getValueFromDOM={() => {
+              const section = document.querySelector('[data-section="ai-model"]');
+              if (!section) return undefined;
+              const input = section.querySelector('input[type="password"]') as HTMLInputElement;
+              if (!input) return undefined;
+              if (input.value === '' && input.placeholder.includes('已配置')) {
+                return '__SET__';
+              }
+              return input.value;
+            }}
+          >
             <SecretField
               label="Token / API Key"
               value={config.ai.apiKey}

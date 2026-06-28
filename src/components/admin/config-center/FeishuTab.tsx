@@ -173,7 +173,7 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
   return (
     <div className="space-y-6">
       {/* 飞书应用绑定 */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
+      <section data-section="feishu-app-bind" className="rounded-xl border border-slate-200 bg-white p-6">
         <div className="mb-4 flex items-start justify-between">
           <div>
             <h3 className="text-base font-semibold text-slate-900">飞书应用绑定</h3>
@@ -193,7 +193,24 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
               hint="飞书应用 ID"
             />
           </AutoSaveField>
-          <AutoSaveField fieldPath="feishu.appSecret" value={config.feishu.appSecret} onSave={ctrl.savePartial}>
+          <AutoSaveField
+            fieldPath="feishu.appSecret"
+            value={config.feishu.appSecret}
+            onSave={ctrl.savePartial}
+            getValueFromDOM={() => {
+              // SecretField在已保存状态下显示空值+placeholder"已配置"
+              // 如果用户没有输入新值，返回__SET__表示保持原有密钥
+              const section = document.querySelector('[data-section="feishu-app-bind"]');
+              if (!section) return undefined;
+              const input = section.querySelector('input[type="password"]') as HTMLInputElement;
+              if (!input) return undefined;
+              // 如果输入为空且placeholder包含"已配置"，保持原值
+              if (input.value === '' && input.placeholder.includes('已配置')) {
+                return '__SET__';
+              }
+              return input.value;
+            }}
+          >
             <SecretField
               label="App Secret"
               value={config.feishu.appSecret}
