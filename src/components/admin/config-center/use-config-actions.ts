@@ -332,19 +332,22 @@ export function useConfigActions({
       }));
 
       const cachedConfig = aiCache[newProvider];
+      const newAiConfig = {
+        ...currentAi,
+        provider: newProvider,
+        model: cachedConfig?.model || (model ? model.defaultVersion : currentAi.model),
+        modelVersion: cachedConfig?.modelVersion || (model ? model.defaultVersion : currentAi.modelVersion),
+        baseUrl: cachedConfig?.baseUrl || (model?.needsBaseUrl ? currentAi.baseUrl : ''),
+        apiKey: cachedConfig?.apiKey || '',
+      };
       setConfig({
         ...config,
-        ai: {
-          ...currentAi,
-          provider: newProvider,
-          model: cachedConfig?.model || (model ? model.defaultVersion : currentAi.model),
-          modelVersion: cachedConfig?.modelVersion || (model ? model.defaultVersion : currentAi.modelVersion),
-          baseUrl: cachedConfig?.baseUrl || (model?.needsBaseUrl ? currentAi.baseUrl : ''),
-          apiKey: cachedConfig?.apiKey || '',
-        },
+        ai: newAiConfig,
       });
+      // ponytail: 切换模型厂商后保存整个ai配置
+      void savePartial({ ai: newAiConfig } as Parameters<typeof savePartial>[0]);
     },
-    [aiCache, config, setAiCache, setConfig],
+    [aiCache, config, setAiCache, setConfig, savePartial],
   );
 
   const importExcel = useCallback(async (file: File, tabKey: ConfigTabKey) => {
