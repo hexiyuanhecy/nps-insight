@@ -13,6 +13,19 @@ export interface Tag1Item {
   enabled: boolean;
 }
 
+/** 用户云资源类型 */
+export interface UserResource {
+  rootFolderToken: string;
+  reportFolderToken: string;
+  monthFolderToken: string;
+  bitableBaseToken: string;
+  userOpenId?: string;
+  userName?: string;
+  userAccessToken?: string;
+  refreshToken?: string;
+  tokenExpiresAt?: number;
+}
+
 export interface TabConfig {
   // 飞书与集成
   feishu: { appId: string; appSecret: string };
@@ -22,6 +35,8 @@ export interface TabConfig {
     url: string;
     status: BitableStatus;
   };
+  /** 用户云资源（可选，用于判断任务是否可运行） */
+  userResource?: UserResource | null;
   dataSource: {
     apiUrl: string;
     apiKey: string;

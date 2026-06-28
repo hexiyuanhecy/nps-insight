@@ -1,6 +1,7 @@
 import { Building, Calendar, Database, FileJson, Link, Upload } from 'lucide-react';
 import type { ConfigCenterController } from '@/components/admin/config-center/use-config-center';
 import {
+  AutoSaveField,
   PrimaryButton,
   SecondaryButton,
   SectionTitle,
@@ -15,11 +16,8 @@ interface DatasourceTabProps {
 }
 
 export function DatasourceTab({ ctrl }: DatasourceTabProps) {
-  const { config, isEditing } = ctrl;
+  const { config } = ctrl;
   if (!config) return null;
-
-  // 禁用状态：非编辑模式时禁用所有输入框
-  const disabled = !isEditing;
 
   return (
     <div className="space-y-6">
@@ -27,25 +25,31 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <SectionTitle icon={<Database className="h-5 w-5" />} title="反馈来源 - API" desc="定期从 Feelgood 或其他数据源拉取反馈" />
         <div className="grid gap-4">
-          <TextField label="API 地址" value={config.dataSource.apiUrl} onChange={(v) => ctrl.updateDataSource('apiUrl', v)} placeholder="https://api.feelgood.example.com/feedback" hint="含协议与路径" disabled={disabled} />
-          <SecretField label="API Key" value={config.dataSource.apiKey} onChange={(v) => ctrl.updateDataSource('apiKey', v)} saved={!!config.dataSource.apiKey} placeholder="Bearer token" hint="需要鉴权时填写" disabled={disabled} />
-          <TextField label="查询参数（可选）" value={config.dataSource.queryParams} onChange={(v) => ctrl.updateDataSource('queryParams', v)} placeholder="type=nps&status=new" hint="拼接到 URL 后面" disabled={disabled} />
-          <SelectField
-            label="时间范围规则"
-            value={config.dataSource.timeRule}
-            options={[
-              { value: 'lastWeek', label: '最近一周' },
-              { value: 'lastMonth', label: '最近一月' },
-              { value: 'custom', label: '自定义（由查询参数决定）' },
-            ]}
-            onChange={(v) => ctrl.updateDataSource('timeRule', v as typeof config.dataSource.timeRule)}
-            disabled={disabled}
-          />
+          <AutoSaveField fieldPath="dataSource.apiUrl" value={config.dataSource.apiUrl} onSave={ctrl.savePartial}>
+            <TextField label="API 地址" value={config.dataSource.apiUrl} onChange={(v) => ctrl.updateDataSource('apiUrl', v)} placeholder="https://api.feelgood.example.com/feedback" hint="含协议与路径" />
+          </AutoSaveField>
+          <AutoSaveField fieldPath="dataSource.apiKey" value={config.dataSource.apiKey} onSave={ctrl.savePartial}>
+            <SecretField label="API Key" value={config.dataSource.apiKey} onChange={(v) => ctrl.updateDataSource('apiKey', v)} saved={!!config.dataSource.apiKey} placeholder="Bearer token" hint="需要鉴权时填写" mode="auto" />
+          </AutoSaveField>
+          <AutoSaveField fieldPath="dataSource.queryParams" value={config.dataSource.queryParams} onSave={ctrl.savePartial}>
+            <TextField label="查询参数（可选）" value={config.dataSource.queryParams} onChange={(v) => ctrl.updateDataSource('queryParams', v)} placeholder="type=nps&status=new" hint="拼接到 URL 后面" />
+          </AutoSaveField>
+          <AutoSaveField fieldPath="dataSource.timeRule" value={config.dataSource.timeRule} onSave={ctrl.savePartial}>
+            <SelectField
+              label="时间范围规则"
+              value={config.dataSource.timeRule}
+              options={[
+                { value: 'lastWeek', label: '最近一周' },
+                { value: 'lastMonth', label: '最近一月' },
+                { value: 'custom', label: '自定义（由查询参数决定）' },
+              ]}
+              onChange={(v) => ctrl.updateDataSource('timeRule', v as typeof config.dataSource.timeRule)}
+            />
+          </AutoSaveField>
           <div className="flex items-center gap-3">
             <button
               onClick={() => ctrl.updateDataSource('apiUrl', MOCK_FEEDBACK_URL)}
-              disabled={disabled}
-              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
             >
               使用 Mock 数据
             </button>
@@ -58,9 +62,15 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <SectionTitle icon={<Building className="h-5 w-5" />} title="租户信息 - API" desc="从租户系统拉取租户基础信息，用于大租户识别和分级" />
         <div className="grid gap-4">
-          <TextField label="API 地址" value={config.tenantSource.apiUrl} onChange={(v) => ctrl.updateTenantSource('apiUrl', v)} placeholder="https://api.tenant.example.com/list" hint="含协议与路径" disabled={disabled} />
-          <SecretField label="API Key" value={config.tenantSource.apiKey} onChange={(v) => ctrl.updateTenantSource('apiKey', v)} saved={!!config.tenantSource.apiKey} placeholder="Bearer token" hint="需要鉴权时填写" disabled={disabled} />
-          <TextField label="查询参数（可选）" value={config.tenantSource.queryParams} onChange={(v) => ctrl.updateTenantSource('queryParams', v)} placeholder="status=active&page_size=100" hint="拼接到 URL 后面" disabled={disabled} />
+          <AutoSaveField fieldPath="tenantSource.apiUrl" value={config.tenantSource.apiUrl} onSave={ctrl.savePartial}>
+            <TextField label="API 地址" value={config.tenantSource.apiUrl} onChange={(v) => ctrl.updateTenantSource('apiUrl', v)} placeholder="https://api.tenant.example.com/list" hint="含协议与路径" />
+          </AutoSaveField>
+          <AutoSaveField fieldPath="tenantSource.apiKey" value={config.tenantSource.apiKey} onSave={ctrl.savePartial}>
+            <SecretField label="API Key" value={config.tenantSource.apiKey} onChange={(v) => ctrl.updateTenantSource('apiKey', v)} saved={!!config.tenantSource.apiKey} placeholder="Bearer token" hint="需要鉴权时填写" mode="auto" />
+          </AutoSaveField>
+          <AutoSaveField fieldPath="tenantSource.queryParams" value={config.tenantSource.queryParams} onSave={ctrl.savePartial}>
+            <TextField label="查询参数（可选）" value={config.tenantSource.queryParams} onChange={(v) => ctrl.updateTenantSource('queryParams', v)} placeholder="status=active&page_size=100" hint="拼接到 URL 后面" />
+          </AutoSaveField>
         </div>
       </section>
 
@@ -101,14 +111,15 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
         {/* Webhook 接收 */}
         <section className="rounded-xl border border-slate-200 bg-white p-6">
           <SectionTitle icon={<FileJson className="h-5 w-5" />} title="Webhook 接收" desc="供外部系统在有新反馈时主动推送" />
-          <TextField
-            label="接收端点"
-            value={config.webhook.url || '/api/webhook/feelgood'}
-            onChange={ctrl.updateWebhook}
-            placeholder="/api/webhook/feelgood"
-            hint="外部系统把新反馈 POST 到这里"
-            disabled={disabled}
-          />
+          <AutoSaveField fieldPath="webhook.url" value={config.webhook.url} onSave={ctrl.savePartial}>
+            <TextField
+              label="接收端点"
+              value={config.webhook.url || '/api/webhook/feelgood'}
+              onChange={ctrl.updateWebhook}
+              placeholder="/api/webhook/feelgood"
+              hint="外部系统把新反馈 POST 到这里"
+            />
+          </AutoSaveField>
           <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
             <div className="font-semibold mb-1">📖 这个地址是做什么用的？</div>
             <ul className="list-disc pl-5 space-y-1">
@@ -125,19 +136,19 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
       {/* 日志反馈平台配置 */}
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <SectionTitle icon={<Calendar className="h-5 w-5" />} title="日志反馈平台配置" desc="在分析报告中生成可点击的日志查询链接；可先使用系统内置 Mock 体验" />
-        <TextField
-          label="日志平台链接模板"
-          value={config.logPlatform.urlTemplate}
-          onChange={ctrl.updateLogPlatform}
-          placeholder="https://log.example.com/?userId={{userId}}&from={{start}}&to={{end}}"
-          hint="支持 {{userId}} / {{start}} / {{end}} 占位符"
-          disabled={disabled}
-        />
+        <AutoSaveField fieldPath="logPlatform.urlTemplate" value={config.logPlatform.urlTemplate} onSave={ctrl.savePartial}>
+          <TextField
+            label="日志平台链接模板"
+            value={config.logPlatform.urlTemplate}
+            onChange={ctrl.updateLogPlatform}
+            placeholder="https://log.example.com/?userId={{userId}}&from={{start}}&to={{end}}"
+            hint="支持 {{userId}} / {{start}} / {{end}} 占位符"
+          />
+        </AutoSaveField>
         <div className="mt-3 flex items-center gap-3">
           <button
             onClick={() => ctrl.updateLogPlatform(MOCK_LOG_URL)}
-            disabled={disabled}
-            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
           >
             填入 Mock URL 体验
           </button>

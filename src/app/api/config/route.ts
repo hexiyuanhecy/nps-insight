@@ -185,7 +185,7 @@ function buildV3Config(): any {
     process.env.CRON_SYNC_SCHEDULE || '0 9 * * 1'
   )
   const analysisParts = parseCronToSchedule(
-    process.env.CRON_ANALYSIS_SCHEDULE || '0 9 1 * *'
+    process.env.CRON_ANALYSIS_SCHEDULE || '0 0 1 * *'
   )
   const schedule = {
     syncUnit: syncParts.unit,
@@ -199,7 +199,7 @@ function buildV3Config(): any {
     analysisWeekDay: analysisParts.weekDay,
     analysisMonthDay: analysisParts.monthDay,
     syncCron: process.env.CRON_SYNC_SCHEDULE || '0 9 * * 1',
-    analysisCron: process.env.CRON_ANALYSIS_SCHEDULE || '0 9 1 * *',
+    analysisCron: process.env.CRON_ANALYSIS_SCHEDULE || '0 0 1 * *',
     devMode: process.env.CRON_DEV_MODE === 'true'
   }
 
@@ -236,6 +236,15 @@ function buildV3Config(): any {
 
 export async function GET(request: NextRequest) {
   try {
+    // 优先从 KV 存储读取配置（云函数环境下 .env 可能不可写）
+    const ownerId = process.env.DEFAULT_OWNER_ID || 'default_owner';
+    let kvConfig: any = null;
+    try {
+      kvConfig = await getConfig(ownerId);
+    } catch (kvError) {
+      console.warn('[Config GET] 从 KV 存储读取配置失败:', kvError);
+    }
+
     // 重新读取 .env 文件以获取最新保存的值
     const envConfig = (() => {
       try {
@@ -258,65 +267,106 @@ export async function GET(request: NextRequest) {
       }
     })();
 
-    // 构建完整配置对象，优先使用 .env 文件中的最新值
+    // 获取环境变量
+    const getEnvValue = (key: string): string => {
+      return envConfig[key] || process.env[key] || '';
+    };
+
+    // 构建完整配置对象，优先级：KV 存储 > .env 文件 > 环境变量 > 默认值
     const feishuConfig = {
-      appId: envConfig.FEISHU_APP_ID || process.env.FEISHU_APP_ID || '',
-      appSecret: envConfig.FEISHU_APP_SECRET || process.env.FEISHU_APP_SECRET || '',
+      appId: kvConfig?.feishu?.appId || getEnvValue('FEISHU_APP_ID'),
+      appSecret: kvConfig?.feishu?.appSecret || getEnvValue('FEISHU_APP_SECRET'),
     };
     const bitableConfig = {
-      mode: (envConfig.BITABLE_MODE || process.env.BITABLE_MODE || 'link') as 'create' | 'link',
-      appToken: envConfig.BITABLE_TOKEN || process.env.BITABLE_TOKEN || '',
-      url: envConfig.BITABLE_URL || process.env.BITABLE_URL || '',
-      feedbackTableId: envConfig.BITABLE_FEEDBACK_TABLE_ID || process.env.BITABLE_TABLE_ID || '',
-      tagsTableId: envConfig.BITABLE_TAGS_TABLE_ID || process.env.BITABLE_TABLE_ID_TAGS || '',
-      tenantsTableId: envConfig.BITABLE_TENANTS_TABLE_ID || process.env.BITABLE_TABLE_ID_TENANTS || '',
-      analysisTableId: envConfig.BITABLE_ANALYSIS_TABLE_ID || process.env.BITABLE_TABLE_ID_ANALYSIS || '',
-      status: (envConfig.BITABLE_TOKEN || process.env.BITABLE_TOKEN) ? 'linked' : 'unset' as 'linked' | 'unset' | 'error',
+      mode: (kvConfig?.bitable?.mode || getEnvValue('BITABLE_MODE') || 'link') as 'create' | 'link',
+      appToken: kvConfig?.bitable?.appToken || getEnvValue('BITABLE_TOKEN'),
+      url: kvConfig?.bitable?.url || getEnvValue('BITABLE_URL'),
+      feedbackTableId: kvConfig?.bitable?.feedbackTableId || getEnvValue('BITABLE_FEEDBACK_TABLE_ID') || getEnvValue('BITABLE_TABLE_ID'),
+      tagsTableId: kvConfig?.bitable?.tagsTableId || getEnvValue('BITABLE_TAGS_TABLE_ID') || getEnvValue('BITABLE_TABLE_ID_TAGS'),
+      tenantsTableId: kvConfig?.bitable?.tenantsTableId || getEnvValue('BITABLE_TENANTS_TABLE_ID') || getEnvValue('BITABLE_TABLE_ID_TENANTS'),
+      analysisTableId: kvConfig?.bitable?.analysisTableId || getEnvValue('BITABLE_ANALYSIS_TABLE_ID') || getEnvValue('BITABLE_TABLE_ID_ANALYSIS'),
+      status: (kvConfig?.bitable?.appToken || getEnvValue('BITABLE_TOKEN')) ? 'linked' : 'unset' as 'linked' | 'unset' | 'error',
     };
     const dataSourceConfig = {
-      apiUrl: envConfig.DATA_SOURCE_API_URL || process.env.DATA_SOURCE_API_URL || '',
-      apiKey: envConfig.DATA_SOURCE_API_KEY || process.env.DATA_SOURCE_API_KEY || '',
-      queryParams: envConfig.DATA_SOURCE_QUERY_PARAMS || process.env.DATA_SOURCE_QUERY_PARAMS || '{ "start": "{{start_unix}}", "end": "{{end_unix}}" }',
-      timeRule: (envConfig.DATA_SOURCE_TIME_RULE || process.env.DATA_SOURCE_TIME_RULE || 'lastWeek') as 'lastWeek' | 'lastMonth' | 'custom',
+      apiUrl: kvConfig?.dataSource?.apiUrl || getEnvValue('DATA_SOURCE_API_URL'),
+      apiKey: kvConfig?.dataSource?.apiKey || getEnvValue('DATA_SOURCE_API_KEY'),
+      queryParams: kvConfig?.dataSource?.queryParams || getEnvValue('DATA_SOURCE_QUERY_PARAMS') || '{ "start": "{{start_unix}}", "end": "{{end_unix}}" }',
+      timeRule: (kvConfig?.dataSource?.timeRule || getEnvValue('DATA_SOURCE_TIME_RULE') || 'lastWeek') as 'lastWeek' | 'lastMonth' | 'custom',
     };
     const tenantSourceConfig = {
-      apiUrl: envConfig.TENANT_SOURCE_API_URL || process.env.TENANT_SOURCE_API_URL || '',
-      apiKey: envConfig.TENANT_SOURCE_API_KEY || process.env.TENANT_SOURCE_API_KEY || '',
-      queryParams: envConfig.TENANT_SOURCE_QUERY_PARAMS || process.env.TENANT_SOURCE_QUERY_PARAMS || '',
+      apiUrl: kvConfig?.tenantSource?.apiUrl || getEnvValue('TENANT_SOURCE_API_URL'),
+      apiKey: kvConfig?.tenantSource?.apiKey || getEnvValue('TENANT_SOURCE_API_KEY'),
+      queryParams: kvConfig?.tenantSource?.queryParams || getEnvValue('TENANT_SOURCE_QUERY_PARAMS') || '',
     };
     const aiConfig = {
-      provider: (envConfig.AGNESAI_PROVIDER || process.env.AGNESAI_PROVIDER || 'agnesai') as 'agnesai' | 'custom',
-      apiKey: envConfig.AGNESAI_API_KEY || process.env.AGNESAI_API_KEY || '',
-      baseUrl: envConfig.AGNESAI_BASE_URL || process.env.AGNESAI_BASE_URL || '',
-      model: envConfig.AGNESAI_MODEL || process.env.AGNESAI_MODEL || 'agnes-2.0-flash',
+      provider: (kvConfig?.ai?.provider || getEnvValue('AGNESAI_PROVIDER') || 'agnesai') as 'agnesai' | 'custom',
+      apiKey: kvConfig?.ai?.apiKey || getEnvValue('AGNESAI_API_KEY'),
+      baseUrl: kvConfig?.ai?.baseUrl || getEnvValue('AGNESAI_BASE_URL'),
+      model: kvConfig?.ai?.model || getEnvValue('AGNESAI_MODEL') || 'agnes-2.0-flash',
     };
     const taggingConfig = {
-      confidenceThreshold: parseFloat(envConfig.CONFIG_CONFIDENCE || process.env.CONFIG_CONFIDENCE || '0.8'),
-      largeTenantLevels: (envConfig.CONFIG_LARGE_TENANTS || process.env.CONFIG_LARGE_TENANTS || 'A4,A5').split(',').filter(Boolean),
+      confidenceThreshold: kvConfig?.tagging?.confidenceThreshold || parseFloat(getEnvValue('CONFIG_CONFIDENCE') || '0.8'),
+      largeTenantLevels: kvConfig?.tagging?.largeTenantLevels || (getEnvValue('CONFIG_LARGE_TENANTS') || 'A4,A5').split(',').filter(Boolean),
     };
+    // 解析 Cron 字符串为分解字段
+    const parseCronToFields = (cron: string) => {
+      const parts = cron.split(' ');
+      const min = parseInt(parts[0], 10);
+      const hr = parseInt(parts[1], 10);
+      const dom = parts[2];
+      const month = parts[3];
+      const dow = parts[4];
+      if (dow !== undefined && dow !== '*' && dom === '*') {
+        // Weekly: "0 10 * * 1" → week, every=1, time=10:00, weekDay=1
+        return { unit: 'week' as const, every: 1, time: `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}`, weekDay: parseInt(dow, 10) || 7, monthDay: 1 };
+      }
+      if (dom !== undefined && dom !== '*' && month === '*') {
+        // Monthly: "0 10 1 * *" → month, every=1, time=10:00, monthDay=1
+        return { unit: 'month' as const, every: 1, time: `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}`, weekDay: 1, monthDay: parseInt(dom, 10) || 1 };
+      }
+      if (dom === '*' && month === '*' && dow === '*') {
+        // Daily: "0 10 * * *" → day, every=1, time=10:00
+        return { unit: 'day' as const, every: 1, time: `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}`, weekDay: 1, monthDay: 1 };
+      }
+      return { unit: 'week' as const, every: 1, time: '10:00', weekDay: 1, monthDay: 1 };
+    };
+
     const scheduleConfig = {
-      syncCron: envConfig.CRON_SYNC_SCHEDULE || process.env.CRON_SYNC_SCHEDULE || '0 9 * * 1',
-      analysisCron: envConfig.CRON_ANALYSIS_SCHEDULE || process.env.CRON_ANALYSIS_SCHEDULE || '0 0 1 * *',
-      devMode: envConfig.CRON_DEV_MODE ? envConfig.CRON_DEV_MODE === 'true' : (process.env.CRON_DEV_MODE === 'true'),
+      syncUnit: parseCronToFields(kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1').unit,
+      syncEvery: parseCronToFields(kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1').every,
+      syncTime: parseCronToFields(kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1').time,
+      syncWeekDay: parseCronToFields(kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1').weekDay,
+      syncMonthDay: parseCronToFields(kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1').monthDay,
+      analysisUnit: parseCronToFields(kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *').unit,
+      analysisEvery: parseCronToFields(kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *').every,
+      analysisTime: parseCronToFields(kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *').time,
+      analysisWeekDay: parseCronToFields(kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *').weekDay,
+      analysisMonthDay: parseCronToFields(kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *').monthDay,
+      syncCron: kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1',
+      analysisCron: kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *',
+      devMode: kvConfig?.schedule?.devMode ?? (getEnvValue('CRON_DEV_MODE') === 'true'),
     };
     const logPlatformConfig = {
-      urlTemplate: envConfig.LOG_PLATFORM_URL_TEMPLATE || process.env.LOG_PLATFORM_URL_TEMPLATE || '',
+      urlTemplate: kvConfig?.logPlatform?.urlTemplate || getEnvValue('LOG_PLATFORM_URL_TEMPLATE'),
     };
     const notificationConfig = {
-      chatIds: envConfig.NOTIFICATION_CHAT_ID || process.env.NOTIFICATION_CHAT_ID || '',
-      adminUserIds: envConfig.NOTIFICATION_ADMIN_USER_IDS || process.env.NOTIFICATION_ADMIN_USER_IDS || '',
+      chatIds: kvConfig?.notification?.chatIds || getEnvValue('NOTIFICATION_CHAT_ID'),
+      adminUserIds: kvConfig?.notification?.adminUserIds || getEnvValue('NOTIFICATION_ADMIN_USER_IDS'),
     };
     const webhookConfig = { url: '/api/webhook/feelgood' };
-    let tag1Config = DEFAULT_TAG1;
-    if (envConfig.CONFIG_TAG1 || process.env.CONFIG_TAG1) {
-      try {
-        const parsed = JSON.parse(envConfig.CONFIG_TAG1 || process.env.CONFIG_TAG1 || '[]');
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          tag1Config = parsed;
-        }
-      } catch {}
+    let tag1Config = kvConfig?.tag1 || DEFAULT_TAG1;
+    if (!tag1Config || tag1Config === DEFAULT_TAG1) {
+      const tag1Env = getEnvValue('CONFIG_TAG1');
+      if (tag1Env) {
+        try {
+          const parsed = JSON.parse(tag1Env);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            tag1Config = parsed;
+          }
+        } catch {}
+      }
     }
-    const tag2InitConfig = envConfig.CONFIG_TAG2_INIT || process.env.CONFIG_TAG2_INIT || '';
+    const tag2InitConfig = kvConfig?.tag2Init || getEnvValue('CONFIG_TAG2_INIT') || '';
 
     const config = {
       feishu: feishuConfig,
@@ -678,8 +728,19 @@ async function saveConfigV3(config: any) {
   // 同步到 KV 存储
   try {
     const ownerId = process.env.DEFAULT_OWNER_ID || 'default_owner';
-    // 从现有配置构建完整的 KV 配置对象
-    const currentConfig = buildV3Config();
+    // 优先从 KV 存储读取当前配置，而不是从环境变量
+    let currentConfig: any = null;
+    try {
+      currentConfig = await getConfig(ownerId);
+    } catch (readErr) {
+      console.warn('[Config] 从 KV 读取当前配置失败，使用默认值:', readErr instanceof Error ? readErr.message : '未知错误');
+    }
+    
+    // 如果 KV 中没有配置，使用 buildV3Config() 的默认值
+    if (!currentConfig) {
+      currentConfig = buildV3Config();
+    }
+    
     const kvConfig = {
       ...currentConfig,
       // 合并传入的新配置

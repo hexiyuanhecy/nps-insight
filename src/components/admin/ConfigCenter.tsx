@@ -44,12 +44,9 @@ export default function ConfigCenter() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-slate-900">配置中心</h1>
         <TopActionButtons
-          isEditing={ctrl.isEditing}
-          onEdit={() => ctrl.setIsEditing(true)}
-          onSave={() => ctrl.saveAll()}
+          config={ctrl.config}
           onWeeklyTagging={ctrl.runWeeklyTagging}
           onMonthlyAnalysis={ctrl.runMonthlyAnalysis}
-          isSaving={ctrl.isSaving}
           isWeeklyTagging={ctrl.isWeeklyTagging}
           isMonthlyAnalysis={ctrl.isMonthlyAnalysis}
         />

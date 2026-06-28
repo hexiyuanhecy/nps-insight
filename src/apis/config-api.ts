@@ -34,6 +34,13 @@ export async function saveConfigV3(config: TabConfig): Promise<ConfigApiResponse
   return postConfig({ action: 'saveConfigV3', config });
 }
 
+/**
+ * 增量保存配置（只传部分配置给后端，后端会与现有配置合并）
+ */
+export async function savePartialConfig(partialConfig: Partial<TabConfig>): Promise<ConfigApiResponse> {
+  return postConfig({ action: 'saveConfigV3', config: partialConfig });
+}
+
 export async function testFeishuConnection(feishu: TabConfig['feishu']): Promise<ConfigApiResponse> {
   return postConfig({ action: 'testFeishu', config: feishu });
 }

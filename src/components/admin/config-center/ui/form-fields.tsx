@@ -44,6 +44,7 @@ export function SecretField({
   hint,
   saved,
   disabled = false,
+  mode = 'manual',
 }: {
   label: string;
   value: string;
@@ -52,6 +53,8 @@ export function SecretField({
   hint?: string;
   saved: boolean;
   disabled?: boolean;
+  /** 编辑模式：manual=手动点击编辑，auto=直接可编辑（配合 AutoSaveField 使用） */
+  mode?: 'manual' | 'auto';
 }) {
   const [editing, setEditing] = useState(!saved);
   const [visible, setVisible] = useState(false);
@@ -65,6 +68,35 @@ export function SecretField({
     setEditing(false);
     setVisible(false);
   };
+
+  // auto 模式：直接显示输入框 + 显示/隐藏按钮，由外部处理保存
+  if (mode === 'auto') {
+    return (
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}</label>
+        <div className="flex items-center gap-2">
+          <input
+            type={visible ? 'text' : 'password'}
+            value={value === '__SET__' ? '' : value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={value === '__SET__' ? '已配置，留空则不修改' : placeholder}
+            disabled={disabled}
+            className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
+          />
+          <button
+            type="button"
+            onClick={() => setVisible(!visible)}
+            disabled={disabled}
+            className="rounded-lg border p-2 text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title={visible ? '隐藏' : '显示'}
+          >
+            {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        </div>
+        {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+      </div>
+    );
+  }
 
   return (
     <div>

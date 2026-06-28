@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BarChart3, Bell, FolderOpen, Link, LogOut, Plus, Sparkles, TestTube, User } from 'lucide-react';
 import type { ConfigCenterController } from '@/components/admin/config-center/use-config-center';
 import {
+  AutoSaveField,
   CollapsiblePanel,
   InfoBox,
   PrimaryButton,
@@ -19,7 +20,7 @@ interface FeishuTabProps {
 }
 
 export function FeishuTab({ ctrl }: FeishuTabProps) {
-  const { config, isEditing } = ctrl;
+  const { config } = ctrl;
   const [userResource, setUserResource] = useState<UserResource | null>(null);
   const [resourceExists, setResourceExists] = useState(false);
   const [loadingResource, setLoadingResource] = useState(true);
@@ -29,9 +30,6 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
     remainingSeconds?: number;
   } | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
-
-  // 禁用状态：非编辑模式时禁用所有输入框
-  const disabled = !isEditing;
 
   const loadResourceStatus = async () => {
     setLoadingResource(true);
@@ -50,6 +48,10 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
     if (result) {
       setResourceExists(true);
       setUserResource(result.resource || null);
+      // 刷新全局 config 中的 userResource，更新按钮可用性
+      if (ctrl.refreshUserResource) {
+        await ctrl.refreshUserResource();
+      }
     }
   };
 
@@ -62,14 +64,92 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
         userInfo: data.userInfo ? { name: data.userInfo.name, open_id: data.userInfo.open_id } : undefined,
         remainingSeconds: data.remainingSeconds,
       });
+      // 授权状态变化后，刷新全局 config 中的 userResource，更新按钮可用性
+      if (ctrl.refreshUserResource) {
+        await ctrl.refreshUserResource();
+      }
     }
     setLoadingAuth(false);
   };
 
   const handleGoAuth = async () => {
-    const authUrl = await ctrl.getAuthUrl();
-    if (authUrl) {
-      window.open(authUrl, '_blank');
+    // 检查是否在飞书 Webview 环境
+    const isInWebview = (() => {
+      if (typeof window === 'undefined') return false;
+      const ua = navigator.userAgent.toLowerCase();
+      const isFeishu = ua.includes('feishu') || ua.includes('larksuite');
+      // 额外检查：飞书 JSAPI 是否已加载（Webview 环境的标志）
+      const hasLarkJSAPI = !!(window as any).lark?.oauth || !!(window as any).ft?.oauth;
+      return isFeishu || hasLarkJSAPI;
+    })();
+
+    console.log('[Auth] 授权入口调用', { isInWebview, userAgent: navigator.userAgent });
+
+    if (isInWebview) {
+      // 飞书 Webview 环境：使用飞书 JSAPI 静默授权
+      try {
+        // 尝试使用飞书 JSAPI
+        const lark = (window as any).lark?.oauth;
+        if (lark?.getAuthCode) {
+          console.log('[Auth] 使用飞书 JSAPI (lark.oauth) 获取授权码');
+          const code = await lark.getAuthCode();
+          console.log('[Auth] 获取到授权码:', code ? '成功' : '为空');
+          if (code) {
+            const result = await ctrl.handleAuthCallback('feishu', code);
+            if (result) {
+              await loadAuthStatus();
+              return;
+            }
+          }
+        }
+        // 兜底：尝试使用旧版飞书 JSAPI
+        const ft = (window as any).ft?.oauth;
+        if (ft?.getAuthCode) {
+          console.log('[Auth] 使用旧版飞书 JSAPI (ft.oauth) 获取授权码');
+          const code = await ft.getAuthCode();
+          console.log('[Auth] 获取到授权码:', code ? '成功' : '为空');
+          if (code) {
+            const result = await ctrl.handleAuthCallback('feishu', code);
+            if (result) {
+              await loadAuthStatus();
+              return;
+            }
+          }
+        }
+        // JSAPI 不可用或未返回 code，尝试 OAuth 跳转
+        console.warn('[Auth] 飞书 JSAPI 不可用或未返回 code，尝试 OAuth 跳转');
+        const authUrl = await ctrl.getAuthUrl();
+        if (authUrl) {
+          // 在 Webview 中尝试打开 OAuth 页面
+          window.location.href = authUrl;
+        } else {
+          alert('无法获取授权链接，请稍后重试');
+        }
+      } catch (error) {
+        console.error('[Auth] 飞书 JSAPI 授权失败:', error);
+        const errorMsg = error instanceof Error ? error.message : '未知错误';
+        // 授权失败时尝试回退到 OAuth
+        try {
+          const authUrl = await ctrl.getAuthUrl();
+          if (authUrl) {
+            // 在 Webview 中尝试打开 OAuth 页面
+            window.location.href = authUrl;
+          } else {
+            ctrl.pushToast?.('免登授权失败：无法获取授权链接', 'error');
+          }
+        } catch {
+          ctrl.pushToast?.('免登授权失败：' + errorMsg, 'error');
+        }
+      }
+    } else {
+      // 外部浏览器：跳转 OAuth 授权页面
+      console.log('[Auth] 外部浏览器环境，使用 OAuth 跳转');
+      const authUrl = await ctrl.getAuthUrl();
+      if (authUrl) {
+        window.open(authUrl, '_blank');
+      } else {
+        alert('无法获取授权链接，请稍后重试');
+      }
     }
   };
 
@@ -104,23 +184,26 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
           <StatusBadge status={config.feishu.appId && config.feishu.appSecret ? 'ok' : 'warn'} text={config.feishu.appId ? '已配置' : '未配置'} />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <TextField
-            label="App ID"
-            value={config.feishu.appId}
-            onChange={(v) => ctrl.updateFeishu('appId', v)}
-            placeholder="cli_xxxxxxxxxxxxxxxx"
-            hint="飞书应用 ID"
-            disabled={disabled}
-          />
-          <SecretField
-            label="App Secret"
-            value={config.feishu.appSecret}
-            onChange={(v) => ctrl.updateFeishu('appSecret', v)}
-            saved={!!config.feishu.appSecret}
-            placeholder="应用密钥"
-            hint="请妥善保管"
-            disabled={disabled}
-          />
+          <AutoSaveField fieldPath="feishu.appId" value={config.feishu.appId} onSave={ctrl.savePartial}>
+            <TextField
+              label="App ID"
+              value={config.feishu.appId}
+              onChange={(v) => ctrl.updateFeishu('appId', v)}
+              placeholder="cli_xxxxxxxxxxxxxxxx"
+              hint="飞书应用 ID"
+            />
+          </AutoSaveField>
+          <AutoSaveField fieldPath="feishu.appSecret" value={config.feishu.appSecret} onSave={ctrl.savePartial}>
+            <SecretField
+              label="App Secret"
+              value={config.feishu.appSecret}
+              onChange={(v) => ctrl.updateFeishu('appSecret', v)}
+              saved={!!config.feishu.appSecret}
+              placeholder="应用密钥"
+              hint="请妥善保管"
+              mode="auto"
+            />
+          </AutoSaveField>
         </div>
         <div className="mt-4">
           <div className="flex items-center gap-3">
@@ -313,14 +396,15 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <SectionTitle icon={<Bell className="h-5 w-5" />} title="飞书通知群绑定" desc="配置飞书群通知，用于推送分析报告和告警" />
         <div className="space-y-4">
-          <TextField
-            label="通知群 ID（多个用英文逗号分隔）"
-            value={config.notification.chatIds}
-            onChange={(v) => ctrl.updateNotification('chatIds', v)}
-            placeholder="oc_xxxxxxxxxxxxxxxx, oc_yyyyyyyyyyyyyyyyyy"
-            hint="通过飞书群设置或飞书开放平台获取 chat_id"
-            disabled={disabled}
-          />
+          <AutoSaveField fieldPath="notification.chatIds" value={config.notification.chatIds} onSave={ctrl.savePartial}>
+            <TextField
+              label="通知群 ID（多个用英文逗号分隔）"
+              value={config.notification.chatIds}
+              onChange={(v) => ctrl.updateNotification('chatIds', v)}
+              placeholder="oc_xxxxxxxxxxxxxxxx, oc_yyyyyyyyyyyyyyyyyy"
+              hint="通过飞书群设置或飞书开放平台获取 chat_id"
+            />
+          </AutoSaveField>
           <div className="flex gap-3">
             <SecondaryButton onClick={() => ctrl.testNotify('feishu')} loading={ctrl.tabLoading.feishu} icon={<Bell className="h-4 w-4" />}>测试发送消息</SecondaryButton>
           </div>
@@ -331,40 +415,42 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <SectionTitle icon={<Bell className="h-5 w-5" />} title="飞书多维表格管理员配置" desc="配置多维表格管理员用户" />
         <div className="space-y-4">
-          <TextField
-            label="表格管理员（飞书用户 ID，多个用英文逗号分隔）"
-            value={config.notification.adminUserIds}
-            onChange={(v) => ctrl.updateNotification('adminUserIds', v)}
-            placeholder="ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx, …"
-            hint="创建/绑定多维表格时，这些用户将被自动添加为表格协作者"
-            disabled={disabled}
-          />
+          <AutoSaveField fieldPath="notification.adminUserIds" value={config.notification.adminUserIds} onSave={ctrl.savePartial}>
+            <TextField
+              label="表格管理员（飞书用户 ID，多个用英文逗号分隔）"
+              value={config.notification.adminUserIds}
+              onChange={(v) => ctrl.updateNotification('adminUserIds', v)}
+              placeholder="ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx, …"
+              hint="创建/绑定多维表格时，这些用户将被自动添加为表格协作者"
+            />
+          </AutoSaveField>
         </div>
       </section>
 
       {/* 大租户定义 */}
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <SectionTitle icon={<Sparkles className="h-5 w-5" />} title="大租户定义" desc="选中的租户级别视为「大租户」，在 Top 问题排序中权重更高" />
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3">
-          {TENANT_LEVELS.map((level) => {
-            const selected = config.tagging.largeTenantLevels.includes(level);
-            return (
-              <button
-                key={level}
-                onClick={() => {
-                  const next = selected
-                    ? config.tagging.largeTenantLevels.filter((l) => l !== level)
-                    : [...config.tagging.largeTenantLevels, level];
-                  ctrl.updateTagging('largeTenantLevels', next);
-                }}
-                disabled={disabled}
-                className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${selected ? 'border-blue-300 bg-blue-50 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'} disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {level}
-              </button>
-            );
-          })}
-        </div>
+        <AutoSaveField fieldPath="tagging.largeTenantLevels" value={config.tagging.largeTenantLevels} onSave={ctrl.savePartial}>
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3">
+            {TENANT_LEVELS.map((level) => {
+              const selected = config.tagging.largeTenantLevels.includes(level);
+              return (
+                <button
+                  key={level}
+                  onClick={() => {
+                    const next = selected
+                      ? config.tagging.largeTenantLevels.filter((l) => l !== level)
+                      : [...config.tagging.largeTenantLevels, level];
+                    ctrl.updateTagging('largeTenantLevels', next);
+                  }}
+                  className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${selected ? 'border-blue-300 bg-blue-50 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  {level}
+                </button>
+              );
+            })}
+          </div>
+        </AutoSaveField>
         <p className="mt-2 text-xs text-slate-500">已选中：{config.tagging.largeTenantLevels.length > 0 ? config.tagging.largeTenantLevels.join('、') : '未选择（默认所有租户同等权重）'}</p>
       </section>
 
@@ -417,14 +503,15 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
             title="绑定已有表格"
             subtitle="把已存在的多维表格通过 App Token 绑定"
           >
-            <TextField
-              label="App Token"
-              value={config.bitable.appToken}
-              onChange={(v) => ctrl.updateBitable('appToken', v)}
-              placeholder="bascnxxxxxxxxxxxxxxxx"
-              hint="从表格 URL /base/ 之后的字符串"
-              disabled={disabled}
-            />
+            <AutoSaveField fieldPath="bitable.appToken" value={config.bitable.appToken} onSave={ctrl.savePartial}>
+              <TextField
+                label="App Token"
+                value={config.bitable.appToken}
+                onChange={(v) => ctrl.updateBitable('appToken', v)}
+                placeholder="bascnxxxxxxxxxxxxxxxx"
+                hint="从表格 URL /base/ 之后的字符串"
+              />
+            </AutoSaveField>
             <div className="mt-3">
               <PrimaryButton onClick={() => ctrl.linkTable('feishu')} loading={ctrl.tabLoading.feishu} icon={<Link className="h-4 w-4" />}>校验并绑定</PrimaryButton>
             </div>

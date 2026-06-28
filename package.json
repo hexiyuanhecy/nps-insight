@@ -15,7 +15,9 @@
     "test:analysis": "ts-node scripts/test-analysis.ts",
     "test:api": "ts-node scripts/test-apis.ts",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "deploy:prepare": "bash scripts/prepare-deploy.sh",
+    "deploy:tcb": "bash scripts/prepare-deploy.sh && tcb fn deploy nps-insight --env-id hexiyuan-d0g6ll45k94275810 --dir deploy"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.45.0",
@@ -44,6 +46,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@cloudbase/cli": "^3.5.8",
     "@playwright/test": "^1.61.0",
     "@types/node": "^20.14.0",
     "@types/pg": "^8.20.0",

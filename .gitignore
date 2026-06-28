@@ -54,3 +54,9 @@ mock-feedbacks-*.json
 
 # Vercel
 .vercel
+
+# 腾讯云开发
+deploy/
+.cloudbase/
+cloudbaserc.json
+.tcbrc

@@ -9,6 +9,7 @@ import {
   runWeeklyTagging as runWeeklyTaggingApi,
   runMonthlyAnalysis as runMonthlyAnalysisApi,
   saveConfigV3,
+  savePartialConfig,
   testAiConnection,
   testFeishuConnection,
   testNotifyConnection,
@@ -72,6 +73,23 @@ export function useConfigActions({
       setIsSaving(false);
     }
   }, [config, loadConfig, pushToast, setIsSaving]);
+
+  /**
+   * 增量保存配置（只传部分配置给后端）
+   * 用于 AutoSaveField 等场景，保存单个字段的变更
+   * 保存成功不显示 toast，失败抛出异常由调用方处理
+   */
+  const savePartial = useCallback(
+    async (partialConfig: Partial<TabConfig>) => {
+      const result = await savePartialConfig(partialConfig);
+      if (!result.success) {
+        throw new Error(result.error || '保存失败');
+      }
+      // 保存成功后重新加载配置，确保本地状态与后端一致
+      await loadConfig();
+    },
+    [loadConfig],
+  );
 
   const saveSectionConfig = useCallback(
     async (section: string, tabKey: ConfigTabKey) => {
@@ -299,16 +317,17 @@ export function useConfigActions({
 
   const handleProviderChange = useCallback(
     (newProvider: string) => {
-      if (!config) return;
+      if (!config || !config.ai) return;
+      const currentAi = config.ai;
       const model = POPULAR_MODELS.find((x) => x.key === newProvider);
 
       setAiCache((prev) => ({
         ...prev,
-        [config.ai.provider]: {
-          apiKey: config.ai.apiKey,
-          baseUrl: config.ai.baseUrl,
-          model: config.ai.model,
-          modelVersion: config.ai.modelVersion,
+        [currentAi.provider]: {
+          apiKey: currentAi.apiKey,
+          baseUrl: currentAi.baseUrl,
+          model: currentAi.model,
+          modelVersion: currentAi.modelVersion,
         },
       }));
 
@@ -316,11 +335,11 @@ export function useConfigActions({
       setConfig({
         ...config,
         ai: {
-          ...config.ai,
+          ...currentAi,
           provider: newProvider,
-          model: cachedConfig?.model || (model ? model.defaultVersion : config.ai.model),
-          modelVersion: cachedConfig?.modelVersion || (model ? model.defaultVersion : config.ai.modelVersion),
-          baseUrl: cachedConfig?.baseUrl || (model?.needsBaseUrl ? config.ai.baseUrl : ''),
+          model: cachedConfig?.model || (model ? model.defaultVersion : currentAi.model),
+          modelVersion: cachedConfig?.modelVersion || (model ? model.defaultVersion : currentAi.modelVersion),
+          baseUrl: cachedConfig?.baseUrl || (model?.needsBaseUrl ? currentAi.baseUrl : ''),
           apiKey: cachedConfig?.apiKey || '',
         },
       });
@@ -456,6 +475,7 @@ export function useConfigActions({
 
   return {
     saveAll,
+    savePartial,
     saveSectionConfig,
     testFeishu,
     testAI,
