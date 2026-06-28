@@ -26,6 +26,34 @@ import type { AiProviderCache, TabConfig, ToastType, ConfigTabKey } from '@/comp
 import { POPULAR_MODELS } from '@/constants/config-center';
 import type { Dispatch, SetStateAction } from 'react';
 
+/**
+ * 深度合并配置对象（只合并一层嵌套对象，数组直接替换）
+ * 用于增量保存后将partialConfig合并到当前config
+ */
+function deepMergeConfig(base: TabConfig, partial: Partial<TabConfig>): TabConfig {
+  const result: any = { ...base };
+  for (const key of Object.keys(partial) as Array<keyof TabConfig>) {
+    const partialValue = (partial as any)[key];
+    if (partialValue === undefined) continue;
+    const baseValue = result[key];
+    // 如果都是对象且不是数组，则深度合并
+    if (
+      typeof partialValue === 'object' &&
+      partialValue !== null &&
+      !Array.isArray(partialValue) &&
+      typeof baseValue === 'object' &&
+      baseValue !== null &&
+      !Array.isArray(baseValue)
+    ) {
+      result[key] = { ...baseValue, ...partialValue };
+    } else {
+      // 数组、基本类型、null直接替换
+      result[key] = partialValue;
+    }
+  }
+  return result as TabConfig;
+}
+
 interface UseConfigActionsOptions {
   config: TabConfig | null;
   setConfig: Dispatch<SetStateAction<TabConfig | null>>;
@@ -85,40 +113,17 @@ export function useConfigActions({
       if (!result.success) {
         throw new Error(result.error || '保存失败');
       }
-      // 保存成功后重新加载配置，确保本地状态与后端一致
-      const prevConfig = config;
-      await loadConfig();
-      // ponytail: 敏感字段后端返回__SET__，需要用保存前的值覆盖
-      // 避免用户刚输入的内容"消失"
-      if (prevConfig && config) {
-        const sensitiveFields: Array<[string, string]> = [
-          ['feishu', 'appSecret'],
-          ['dataSource', 'apiKey'],
-          ['tenantSource', 'apiKey'],
-          ['ai', 'apiKey'],
-        ];
-        let needsUpdate = false;
-        const mergedConfig = { ...config } as Record<string, any>;
-        for (const [section, field] of sensitiveFields) {
-          const prevSection = (prevConfig as Record<string, any>)[section];
-          const currSection = (config as Record<string, any>)[section];
-          const prevValue = prevSection?.[field];
-          const currValue = currSection?.[field];
-          // 如果后端返回__SET__，但之前有实际值，则用之前的值
-          if (currValue === '__SET__' && prevValue && prevValue !== '__SET__') {
-            if (!mergedConfig[section]) {
-              mergedConfig[section] = { ...currSection };
-            }
-            mergedConfig[section][field] = prevValue;
-            needsUpdate = true;
-          }
-        }
-        if (needsUpdate) {
-          setConfig(mergedConfig as TabConfig);
-        }
-      }
+      // ponytail: 保存成功后，直接用传入的partialConfig合并到当前config
+      // 而不是调用loadConfig()重新加载，原因：
+      // 1. 后端返回的敏感字段是__SET__占位符，会覆盖用户刚输入的值
+      // 2. React setConfig是异步的，await loadConfig()后config还是旧值
+      // 3. 增量保存的场景下，前端已经知道改了什么，直接合并更高效
+      setConfig((prev) => {
+        if (!prev) return prev;
+        return deepMergeConfig(prev, partialConfig);
+      });
     },
-    [config, loadConfig, setConfig],
+    [setConfig],
   );
 
   const saveSectionConfig = useCallback(
