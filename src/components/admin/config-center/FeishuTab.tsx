@@ -459,6 +459,7 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
                       ? config.tagging.largeTenantLevels.filter((l) => l !== level)
                       : [...config.tagging.largeTenantLevels, level];
                     ctrl.updateTagging('largeTenantLevels', next);
+                    void ctrl.savePartial({ tagging: { largeTenantLevels: next } } as Parameters<typeof ctrl.savePartial>[0]);
                   }}
                   className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${selected ? 'border-blue-300 bg-blue-50 text-blue-700 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                 >
