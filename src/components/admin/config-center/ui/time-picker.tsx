@@ -1,23 +1,49 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
-export function TimePicker({ value, onChange, disabled = false }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+export function TimePicker({ value, onChange, disabled = false, id }: { value: string; onChange: (v: string) => void; disabled?: boolean; id?: string }) {
   const [isOpen, setIsOpen] = useState(false);
   const [tempHour, setTempHour] = useState(parseInt(value?.split(':')[0], 10) || 10);
   const [tempMinute, setTempMinute] = useState(parseInt(value?.split(':')[1], 10) || 0);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const hiddenInputRef = useRef<HTMLInputElement>(null);
+
+  // ponytail: 同步外部value到内部状态
+  useEffect(() => {
+    setTempHour(parseInt(value?.split(':')[0], 10) || 10);
+    setTempMinute(parseInt(value?.split(':')[1], 10) || 0);
+  }, [value]);
 
   const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
   const minutes = ['00', '15', '30', '45'];
 
   const handleSelect = () => {
-    onChange(`${String(tempHour).padStart(2, '0')}:${String(tempMinute).padStart(2, '0')}`);
+    const newValue = `${String(tempHour).padStart(2, '0')}:${String(tempMinute).padStart(2, '0')}`;
+    onChange(newValue);
     setIsOpen(false);
+    // ponytail: 更新隐藏input的值，并触发blur事件让AutoSaveField捕获
+    if (hiddenInputRef.current) {
+      hiddenInputRef.current.value = newValue;
+      hiddenInputRef.current.focus();
+      hiddenInputRef.current.blur();
+    }
   };
 
   return (
     <div className="relative">
+      {/* ponytail: 隐藏input用于AutoSaveField的getValueFromDOM读取最新值 */}
+      <input
+        ref={hiddenInputRef}
+        type="text"
+        id={id}
+        value={value}
+        onChange={() => {}}
+        className="sr-only"
+        tabIndex={-1}
+      />
       <button
+        ref={buttonRef}
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
         className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 transition-colors disabled:bg-slate-50 disabled:text-slate-500"

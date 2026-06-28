@@ -382,8 +382,17 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
                 </AutoSaveField>
               </>
             )}
-            <AutoSaveField fieldPath="schedule.syncTime" value={config.schedule.syncTime} onSave={ctrl.savePartial}>
+            <AutoSaveField 
+              fieldPath="schedule.syncTime" 
+              value={config.schedule.syncTime} 
+              onSave={ctrl.savePartial}
+              getValueFromDOM={() => {
+                const input = document.getElementById('sync-time-input') as HTMLInputElement | null;
+                return input?.value;
+              }}
+            >
               <TimePicker
+                id="sync-time-input"
                 value={config.schedule.syncTime}
                 onChange={(v) => ctrl.updateSchedule('syncTime', v)}
               />
@@ -460,8 +469,17 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
               </>
             )}
             <span className="text-sm text-slate-600">时间</span>
-            <AutoSaveField fieldPath="schedule.analysisTime" value={config.schedule.analysisTime} onSave={ctrl.savePartial}>
+            <AutoSaveField 
+              fieldPath="schedule.analysisTime" 
+              value={config.schedule.analysisTime} 
+              onSave={ctrl.savePartial}
+              getValueFromDOM={() => {
+                const input = document.getElementById('analysis-time-input') as HTMLInputElement | null;
+                return input?.value;
+              }}
+            >
               <TimePicker
+                id="analysis-time-input"
                 value={config.schedule.analysisTime}
                 onChange={(v) => ctrl.updateSchedule('analysisTime', v)}
               />
