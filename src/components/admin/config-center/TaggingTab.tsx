@@ -222,7 +222,10 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
         <SectionTitle icon={<FolderOpen className="h-5 w-5" />} title="Tag2 初始化预设" desc="首次使用时可预置一批二级标签；系统内置了一个示例供参考" />
         <div className="flex flex-wrap items-start gap-3">
           <button
-            onClick={() => ctrl.setConfig({ ...config, tag2Init: DEFAULT_TAG2_PRESET })}
+            onClick={() => {
+              ctrl.setConfig({ ...config, tag2Init: DEFAULT_TAG2_PRESET });
+              void ctrl.savePartial({ tag2Init: DEFAULT_TAG2_PRESET } as Parameters<typeof ctrl.savePartial>[0]);
+            }}
             className="inline-flex items-center gap-2 rounded-lg border border-dashed border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 transition-colors"
           >
             <Sparkles className="h-4 w-4" /> 载入系统内置示例
@@ -283,9 +286,18 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <div className="mb-4 flex items-start justify-between">
           <SectionTitle icon={<Clock className="h-5 w-5" />} title="定时任务周期" desc="友好选择器会自动生成 Cron；所有时间按服务器时区" />
-          <AutoSaveField fieldPath="schedule.devMode" value={config.schedule.devMode || false} onSave={ctrl.savePartial}>
+          <AutoSaveField
+            fieldPath="schedule.devMode"
+            value={config.schedule.devMode || false}
+            onSave={ctrl.savePartial}
+            getValueFromDOM={() => {
+              const checkbox = document.getElementById('dev-mode-checkbox') as HTMLInputElement | null;
+              return checkbox?.checked;
+            }}
+          >
             <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-600">
               <input
+                id="dev-mode-checkbox"
                 type="checkbox"
                 checked={config.schedule.devMode || false}
                 onChange={(e) => ctrl.updateSchedule('devMode', e.target.checked)}
@@ -301,15 +313,24 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
           <label className="mb-2 block text-sm font-medium text-slate-700">数据拉取周期</label>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm text-slate-700">每</span>
-            <AutoSaveField fieldPath="schedule.syncEvery" value={config.schedule.syncEvery} onSave={ctrl.savePartial}>
-              <input
-                type="number"
-                min={1}
-                max={99}
-                value={config.schedule.syncEvery}
-                onChange={(e) => ctrl.updateSchedule('syncEvery', Math.min(99, Math.max(1, parseInt(e.target.value, 10) || 1)))}
-                className="w-20 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              />
+            <AutoSaveField
+            fieldPath="schedule.syncEvery"
+            value={config.schedule.syncEvery}
+            onSave={ctrl.savePartial}
+            getValueFromDOM={() => {
+              const input = document.getElementById('sync-every-input') as HTMLInputElement | null;
+              return input ? parseInt(input.value, 10) || 1 : undefined;
+            }}
+          >
+            <input
+              id="sync-every-input"
+              type="number"
+              min={1}
+              max={99}
+              value={config.schedule.syncEvery}
+              onChange={(e) => ctrl.updateSchedule('syncEvery', Math.min(99, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+              className="w-20 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            />
             </AutoSaveField>
             <AutoSaveField fieldPath="schedule.syncUnit" value={config.schedule.syncUnit} onSave={ctrl.savePartial}>
               <select
@@ -369,16 +390,25 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
           <label className="mb-2 block text-sm font-medium text-slate-700">月度分析周期</label>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm text-slate-700">每</span>
-            <AutoSaveField fieldPath="schedule.analysisEvery" value={config.schedule.analysisEvery} onSave={ctrl.savePartial}>
-              <input
-                type="number"
-                min={1}
-                max={99}
-                value={config.schedule.analysisEvery}
-                onChange={(e) => ctrl.updateSchedule('analysisEvery', Math.min(99, Math.max(1, parseInt(e.target.value, 10) || 1)))}
-                className="w-20 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              />
-            </AutoSaveField>
+            <AutoSaveField
+            fieldPath="schedule.analysisEvery"
+            value={config.schedule.analysisEvery}
+            onSave={ctrl.savePartial}
+            getValueFromDOM={() => {
+              const input = document.getElementById('analysis-every-input') as HTMLInputElement | null;
+              return input ? parseInt(input.value, 10) || 1 : undefined;
+            }}
+          >
+            <input
+              id="analysis-every-input"
+              type="number"
+              min={1}
+              max={99}
+              value={config.schedule.analysisEvery}
+              onChange={(e) => ctrl.updateSchedule('analysisEvery', Math.min(99, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+              className="w-20 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            />
+          </AutoSaveField>
             <AutoSaveField fieldPath="schedule.analysisUnit" value={config.schedule.analysisUnit} onSave={ctrl.savePartial}>
               <select
                 value={config.schedule.analysisUnit}

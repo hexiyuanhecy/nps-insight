@@ -331,19 +331,29 @@ export async function GET(request: NextRequest) {
       return { unit: 'week' as const, every: 1, time: '10:00', weekDay: 1, monthDay: 1 };
     };
 
+    // 优先从分解字段读取（保存时会同时写分解字段和cron表达式）
+    // 如果分解字段存在，优先使用；否则从cron表达式解析
+    const syncCronBase = kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1';
+    const analysisCronBase = kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *';
+    const parsedSync = parseCronToFields(syncCronBase);
+    const parsedAnalysis = parseCronToFields(analysisCronBase);
+
     const scheduleConfig = {
-      syncUnit: parseCronToFields(kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1').unit,
-      syncEvery: parseCronToFields(kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1').every,
-      syncTime: parseCronToFields(kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1').time,
-      syncWeekDay: parseCronToFields(kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1').weekDay,
-      syncMonthDay: parseCronToFields(kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1').monthDay,
-      analysisUnit: parseCronToFields(kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *').unit,
-      analysisEvery: parseCronToFields(kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *').every,
-      analysisTime: parseCronToFields(kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *').time,
-      analysisWeekDay: parseCronToFields(kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *').weekDay,
-      analysisMonthDay: parseCronToFields(kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *').monthDay,
-      syncCron: kvConfig?.schedule?.syncCron || getEnvValue('CRON_SYNC_SCHEDULE') || '0 9 * * 1',
-      analysisCron: kvConfig?.schedule?.analysisCron || getEnvValue('CRON_ANALYSIS_SCHEDULE') || '0 0 1 * *',
+      // 数据拉取周期：优先使用分解字段，否则从cron解析
+      syncUnit: kvConfig?.schedule?.syncUnit || getEnvValue('CRON_SYNC_UNIT') || parsedSync.unit,
+      syncEvery: kvConfig?.schedule?.syncEvery !== undefined ? kvConfig.schedule.syncEvery : (parseInt(getEnvValue('CRON_SYNC_EVERY') || '') || parsedSync.every),
+      syncTime: kvConfig?.schedule?.syncTime || getEnvValue('CRON_SYNC_TIME') || parsedSync.time,
+      syncWeekDay: kvConfig?.schedule?.syncWeekDay !== undefined ? kvConfig.schedule.syncWeekDay : (parseInt(getEnvValue('CRON_SYNC_WEEK_DAY') || '') || parsedSync.weekDay),
+      syncMonthDay: kvConfig?.schedule?.syncMonthDay !== undefined ? kvConfig.schedule.syncMonthDay : (parseInt(getEnvValue('CRON_SYNC_MONTH_DAY') || '') || parsedSync.monthDay),
+      // 月度分析周期：优先使用分解字段，否则从cron解析
+      analysisUnit: kvConfig?.schedule?.analysisUnit || getEnvValue('CRON_ANALYSIS_UNIT') || parsedAnalysis.unit,
+      analysisEvery: kvConfig?.schedule?.analysisEvery !== undefined ? kvConfig.schedule.analysisEvery : (parseInt(getEnvValue('CRON_ANALYSIS_EVERY') || '') || parsedAnalysis.every),
+      analysisTime: kvConfig?.schedule?.analysisTime || getEnvValue('CRON_ANALYSIS_TIME') || parsedAnalysis.time,
+      analysisWeekDay: kvConfig?.schedule?.analysisWeekDay !== undefined ? kvConfig.schedule.analysisWeekDay : parsedAnalysis.weekDay,
+      analysisMonthDay: kvConfig?.schedule?.analysisMonthDay !== undefined ? kvConfig.schedule.analysisMonthDay : (parseInt(getEnvValue('CRON_ANALYSIS_MONTH_DAY') || '') || parsedAnalysis.monthDay),
+      // Cron 表达式
+      syncCron: syncCronBase,
+      analysisCron: analysisCronBase,
       devMode: kvConfig?.schedule?.devMode ?? (getEnvValue('CRON_DEV_MODE') === 'true'),
     };
     const logPlatformConfig = {
@@ -600,6 +610,43 @@ async function saveConfigV3(config: any) {
 
     // 6. 任务 / 日志 / 通知
     if (config.schedule) {
+      // 保存分解的调度字段（syncEvery, syncUnit, syncWeekDay, syncMonthDay, syncTime）
+      if (config.schedule.syncEvery !== undefined) {
+        notifyConfigChange('cron', 'syncEvery', String(config.schedule.syncEvery));
+        changes.push({ section: 'schedule', key: 'CRON_SYNC_EVERY', value: String(config.schedule.syncEvery) });
+      }
+      if (config.schedule.syncUnit) {
+        notifyConfigChange('cron', 'syncUnit', config.schedule.syncUnit);
+        changes.push({ section: 'schedule', key: 'CRON_SYNC_UNIT', value: config.schedule.syncUnit });
+      }
+      if (config.schedule.syncWeekDay !== undefined) {
+        notifyConfigChange('cron', 'syncWeekDay', String(config.schedule.syncWeekDay));
+        changes.push({ section: 'schedule', key: 'CRON_SYNC_WEEK_DAY', value: String(config.schedule.syncWeekDay) });
+      }
+      if (config.schedule.syncMonthDay !== undefined) {
+        notifyConfigChange('cron', 'syncMonthDay', String(config.schedule.syncMonthDay));
+        changes.push({ section: 'schedule', key: 'CRON_SYNC_MONTH_DAY', value: String(config.schedule.syncMonthDay) });
+      }
+      if (config.schedule.syncTime) {
+        notifyConfigChange('cron', 'syncTime', config.schedule.syncTime);
+        changes.push({ section: 'schedule', key: 'CRON_SYNC_TIME', value: config.schedule.syncTime });
+      }
+      if (config.schedule.analysisEvery !== undefined) {
+        notifyConfigChange('cron', 'analysisEvery', String(config.schedule.analysisEvery));
+        changes.push({ section: 'schedule', key: 'CRON_ANALYSIS_EVERY', value: String(config.schedule.analysisEvery) });
+      }
+      if (config.schedule.analysisUnit) {
+        notifyConfigChange('cron', 'analysisUnit', config.schedule.analysisUnit);
+        changes.push({ section: 'schedule', key: 'CRON_ANALYSIS_UNIT', value: config.schedule.analysisUnit });
+      }
+      if (config.schedule.analysisMonthDay !== undefined) {
+        notifyConfigChange('cron', 'analysisMonthDay', String(config.schedule.analysisMonthDay));
+        changes.push({ section: 'schedule', key: 'CRON_ANALYSIS_MONTH_DAY', value: String(config.schedule.analysisMonthDay) });
+      }
+      if (config.schedule.analysisTime) {
+        notifyConfigChange('cron', 'analysisTime', config.schedule.analysisTime);
+        changes.push({ section: 'schedule', key: 'CRON_ANALYSIS_TIME', value: config.schedule.analysisTime });
+      }
       if (config.schedule.syncCron) notifyConfigChange('cron', 'syncCron', config.schedule.syncCron);
       if (config.schedule.analysisCron)
         notifyConfigChange('cron', 'analysisCron', config.schedule.analysisCron);
@@ -661,6 +708,15 @@ async function saveConfigV3(config: any) {
 
   if (config.schedule?.syncCron) envVars.CRON_SYNC_SCHEDULE = config.schedule.syncCron;
   if (config.schedule?.analysisCron) envVars.CRON_ANALYSIS_SCHEDULE = config.schedule.analysisCron;
+  if (config.schedule?.syncEvery !== undefined) envVars.CRON_SYNC_EVERY = String(config.schedule.syncEvery);
+  if (config.schedule?.syncUnit) envVars.CRON_SYNC_UNIT = config.schedule.syncUnit;
+  if (config.schedule?.syncWeekDay !== undefined) envVars.CRON_SYNC_WEEK_DAY = String(config.schedule.syncWeekDay);
+  if (config.schedule?.syncMonthDay !== undefined) envVars.CRON_SYNC_MONTH_DAY = String(config.schedule.syncMonthDay);
+  if (config.schedule?.syncTime) envVars.CRON_SYNC_TIME = config.schedule.syncTime;
+  if (config.schedule?.analysisEvery !== undefined) envVars.CRON_ANALYSIS_EVERY = String(config.schedule.analysisEvery);
+  if (config.schedule?.analysisUnit) envVars.CRON_ANALYSIS_UNIT = config.schedule.analysisUnit;
+  if (config.schedule?.analysisMonthDay !== undefined) envVars.CRON_ANALYSIS_MONTH_DAY = String(config.schedule.analysisMonthDay);
+  if (config.schedule?.analysisTime) envVars.CRON_ANALYSIS_TIME = config.schedule.analysisTime;
 
   if (config.logPlatform?.urlTemplate) envVars.LOG_PLATFORM_URL_TEMPLATE = config.logPlatform.urlTemplate;
 

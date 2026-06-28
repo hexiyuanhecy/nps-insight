@@ -62,7 +62,10 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
           </AutoSaveField>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => ctrl.updateDataSource('apiUrl', MOCK_FEEDBACK_URL)}
+              onClick={() => {
+                ctrl.updateDataSource('apiUrl', MOCK_FEEDBACK_URL);
+                void ctrl.savePartial({ dataSource: { apiUrl: MOCK_FEEDBACK_URL } } as Parameters<typeof ctrl.savePartial>[0]);
+              }}
               className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
             >
               使用 Mock 数据
@@ -175,7 +178,10 @@ export function DatasourceTab({ ctrl }: DatasourceTabProps) {
         </AutoSaveField>
         <div className="mt-3 flex items-center gap-3">
           <button
-            onClick={() => ctrl.updateLogPlatform(MOCK_LOG_URL)}
+            onClick={() => {
+              ctrl.updateLogPlatform(MOCK_LOG_URL);
+              void ctrl.savePartial({ logPlatform: { urlTemplate: MOCK_LOG_URL } } as Parameters<typeof ctrl.savePartial>[0]);
+            }}
             className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
           >
             填入 Mock URL 体验
