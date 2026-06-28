@@ -57,6 +57,7 @@ mock-feedbacks-*.json
 
 # 腾讯云开发
 deploy/
+deploy.zip
 .cloudbase/
 cloudbaserc.json
 .tcbrc

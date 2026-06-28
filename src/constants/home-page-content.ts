@@ -6,7 +6,7 @@ export const TECH_STACK_ITEMS = [
   'Tailwind CSS',
   'AgnesAI',
   '飞书SDK',
-  'Vercel',
+  '腾讯云 SCF',
 ] as const;
 
 export interface HomeRoleItem {

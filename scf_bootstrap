@@ -1,0 +1,14 @@
+#!/bin/bash
+# 腾讯云函数 SCF Web Function 启动脚本
+# 用于启动 Next.js standalone 应用
+
+# 设置端口（云函数默认 9000）
+export PORT=9000
+export HOSTNAME=0.0.0.0
+export NODE_ENV=production
+
+# 切换到应用目录
+cd "$(dirname "$0")"
+
+# 启动 Next.js 服务（必须使用 Node.js 绝对路径）
+/var/lang/node18/bin/node server.js

@@ -118,7 +118,7 @@ export default function HomePage() {
           <FeatureCard
             icon={<Clock className="h-6 w-6" />}
             title="定时同步"
-            description="支持Vercel Cron定时任务，自动拉取数据、执行AI分析、发送群通知"
+            description="支持腾讯云 SCF 定时任务，自动拉取数据、执行AI分析、发送群通知"
           />
           <FeatureCard
             icon={<Settings className="h-6 w-6" />}
