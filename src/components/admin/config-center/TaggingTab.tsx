@@ -190,7 +190,11 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
                     </td>
                     <td className="py-2 pr-4 text-right">
                       <button
-                        onClick={() => ctrl.removeTag1(idx)}
+                        onClick={() => {
+                          const next = config.tag1.filter((_, i) => i !== idx);
+                          ctrl.setConfig({ ...config, tag1: next });
+                          void ctrl.savePartial({ tag1: next } as Parameters<typeof ctrl.savePartial>[0]);
+                        }}
                         disabled={config.tag1.length <= 1}
                         className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                         title="删除标签"
@@ -206,7 +210,11 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
         </AutoSaveField>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <button
-            onClick={ctrl.addTag1}
+            onClick={() => {
+              const next = [...config.tag1, { name: '', definition: '', enabled: true }];
+              ctrl.setConfig({ ...config, tag1: next });
+              void ctrl.savePartial({ tag1: next } as Parameters<typeof ctrl.savePartial>[0]);
+            }}
             className="inline-flex items-center gap-2 rounded-lg border border-dashed border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 transition-colors"
           >
             <Plus className="h-4 w-4" />添加标签
