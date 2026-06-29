@@ -14,6 +14,7 @@ import {
 } from '@/components/admin/config-center/ui';
 import { TENANT_LEVELS } from '@/constants/config-center';
 import type { UserResource } from '@/apis/config-api';
+import { useFeishuAuth } from '@/hooks/use-feishu-auth';
 
 interface FeishuTabProps {
   ctrl: ConfigCenterController;
@@ -24,12 +25,17 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
   const [userResource, setUserResource] = useState<UserResource | null>(null);
   const [resourceExists, setResourceExists] = useState(false);
   const [loadingResource, setLoadingResource] = useState(true);
-  const [authStatus, setAuthStatus] = useState<{
-    isAuthorized: boolean;
-    userInfo?: { name: string; open_id: string };
-    remainingSeconds?: number;
-  } | null>(null);
-  const [loadingAuth, setLoadingAuth] = useState(true);
+  const { authState, loadAuthStatus, doAuth } = useFeishuAuth({
+    autoSilentAuth: true,
+    onSuccess: () => {
+      if (ctrl.refreshUserResource) {
+        void ctrl.refreshUserResource();
+      }
+    },
+    onError: (error) => {
+      ctrl.pushToast?.(error, 'error');
+    },
+  });
 
   const loadResourceStatus = async () => {
     setLoadingResource(true);
@@ -48,107 +54,8 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
     if (result) {
       setResourceExists(true);
       setUserResource(result.resource || null);
-      // 刷新全局 config 中的 userResource，更新按钮可用性
       if (ctrl.refreshUserResource) {
         await ctrl.refreshUserResource();
-      }
-    }
-  };
-
-  const loadAuthStatus = async () => {
-    setLoadingAuth(true);
-    const data = await ctrl.loadAuthStatus();
-    if (data) {
-      setAuthStatus({
-        isAuthorized: data.isAuthorized,
-        userInfo: data.userInfo ? { name: data.userInfo.name, open_id: data.userInfo.open_id } : undefined,
-        remainingSeconds: data.remainingSeconds,
-      });
-      // 授权状态变化后，刷新全局 config 中的 userResource，更新按钮可用性
-      if (ctrl.refreshUserResource) {
-        await ctrl.refreshUserResource();
-      }
-    }
-    setLoadingAuth(false);
-  };
-
-  const handleGoAuth = async () => {
-    // 检查是否在飞书 Webview 环境
-    const isInWebview = (() => {
-      if (typeof window === 'undefined') return false;
-      const ua = navigator.userAgent.toLowerCase();
-      const isFeishu = ua.includes('feishu') || ua.includes('larksuite');
-      // 额外检查：飞书 JSAPI 是否已加载（Webview 环境的标志）
-      const hasLarkJSAPI = !!(window as any).lark?.oauth || !!(window as any).ft?.oauth;
-      return isFeishu || hasLarkJSAPI;
-    })();
-
-    console.log('[Auth] 授权入口调用', { isInWebview, userAgent: navigator.userAgent });
-
-    if (isInWebview) {
-      // 飞书 Webview 环境：使用飞书 JSAPI 静默授权
-      try {
-        // 尝试使用飞书 JSAPI
-        const lark = (window as any).lark?.oauth;
-        if (lark?.getAuthCode) {
-          console.log('[Auth] 使用飞书 JSAPI (lark.oauth) 获取授权码');
-          const code = await lark.getAuthCode();
-          console.log('[Auth] 获取到授权码:', code ? '成功' : '为空');
-          if (code) {
-            const result = await ctrl.handleAuthCallback('feishu', code);
-            if (result) {
-              await loadAuthStatus();
-              return;
-            }
-          }
-        }
-        // 兜底：尝试使用旧版飞书 JSAPI
-        const ft = (window as any).ft?.oauth;
-        if (ft?.getAuthCode) {
-          console.log('[Auth] 使用旧版飞书 JSAPI (ft.oauth) 获取授权码');
-          const code = await ft.getAuthCode();
-          console.log('[Auth] 获取到授权码:', code ? '成功' : '为空');
-          if (code) {
-            const result = await ctrl.handleAuthCallback('feishu', code);
-            if (result) {
-              await loadAuthStatus();
-              return;
-            }
-          }
-        }
-        // JSAPI 不可用或未返回 code，尝试 OAuth 跳转
-        console.warn('[Auth] 飞书 JSAPI 不可用或未返回 code，尝试 OAuth 跳转');
-        const authUrl = await ctrl.getAuthUrl();
-        if (authUrl) {
-          // 在 Webview 中尝试打开 OAuth 页面
-          window.location.href = authUrl;
-        } else {
-          alert('无法获取授权链接，请稍后重试');
-        }
-      } catch (error) {
-        console.error('[Auth] 飞书 JSAPI 授权失败:', error);
-        const errorMsg = error instanceof Error ? error.message : '未知错误';
-        // 授权失败时尝试回退到 OAuth
-        try {
-          const authUrl = await ctrl.getAuthUrl();
-          if (authUrl) {
-            // 在 Webview 中尝试打开 OAuth 页面
-            window.location.href = authUrl;
-          } else {
-            ctrl.pushToast?.('免登授权失败：无法获取授权链接', 'error');
-          }
-        } catch {
-          ctrl.pushToast?.('免登授权失败：' + errorMsg, 'error');
-        }
-      }
-    } else {
-      // 外部浏览器：跳转 OAuth 授权页面
-      console.log('[Auth] 外部浏览器环境，使用 OAuth 跳转');
-      const authUrl = await ctrl.getAuthUrl();
-      if (authUrl) {
-        window.open(authUrl, '_blank');
-      } else {
-        alert('无法获取授权链接，请稍后重试');
       }
     }
   };
@@ -156,15 +63,12 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
   const handleLogout = async () => {
     const success = await ctrl.logoutAuth('feishu');
     if (success) {
-      setAuthStatus(null);
-      loadAuthStatus();
+      await loadAuthStatus();
     }
   };
 
-  // 加载用户资源状态
   useEffect(() => {
     loadResourceStatus();
-    loadAuthStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -239,28 +143,35 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
             </p>
           </div>
           <StatusBadge
-            status={loadingAuth ? 'warn' : (authStatus?.isAuthorized ? 'ok' : 'warn')}
-            text={loadingAuth ? '加载中...' : (authStatus?.isAuthorized ? '已授权' : '未授权')}
+            status={authState.loading || authState.authorizing ? 'warn' : (authState.isAuthorized ? 'ok' : 'warn')}
+            text={authState.loading ? '加载中...' : authState.authorizing ? '授权中...' : (authState.isAuthorized ? '已授权' : '未授权')}
           />
         </div>
 
-        {loadingAuth ? (
+        {authState.loading ? (
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
             <p className="text-sm text-slate-500">正在加载授权状态...</p>
           </div>
-        ) : authStatus?.isAuthorized && authStatus.userInfo ? (
+        ) : authState.authorizing ? (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+            <p className="text-sm text-blue-700">正在前往飞书授权...</p>
+            <p className="mt-1 text-xs text-blue-600">
+              飞书环境下将自动完成授权，请稍候...
+            </p>
+          </div>
+        ) : authState.isAuthorized && authState.userInfo ? (
           <div className="space-y-3">
             <div className="flex items-center gap-3 rounded-lg border border-green-100 bg-green-50/50 p-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100">
                 <User className="h-5 w-5 text-green-600" />
               </div>
               <div className="flex-1">
-                <p className="text-sm font-medium text-slate-900">{authStatus.userInfo.name}</p>
-                <p className="text-xs text-slate-500">OpenID: {authStatus.userInfo.open_id}</p>
+                <p className="text-sm font-medium text-slate-900">{authState.userInfo.name}</p>
+                <p className="text-xs text-slate-500">OpenID: {authState.userInfo.open_id}</p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-slate-500">
-                  Token 剩余 {authStatus.remainingSeconds ? Math.floor(authStatus.remainingSeconds / 60) : '--'} 分钟
+                  Token 剩余 {authState.remainingSeconds ? Math.floor(authState.remainingSeconds / 60) : '--'} 分钟
                 </p>
               </div>
             </div>
@@ -287,7 +198,7 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
             </InfoBox>
             <div className="flex gap-3">
               <PrimaryButton
-                onClick={handleGoAuth}
+                onClick={() => doAuth()}
                 loading={ctrl.tabLoading.feishu}
                 icon={<User className="h-4 w-4" />}
               >

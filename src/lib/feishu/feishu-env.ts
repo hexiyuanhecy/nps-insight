@@ -19,30 +19,49 @@ export function isInFeishuMiniApp(): boolean {
 }
 
 /**
+ * 通过 User-Agent 判断是否在飞书客户端内
+ * 这是最可靠的初筛方式，不受 JSAPI 注入时机影响
+ */
+export function isFeishuClientByUA(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent.toLowerCase();
+  return ua.includes('feishu') || ua.includes('larksuite');
+}
+
+/**
  * 判断是否在飞书 Webview 环境中
  * 飞书 Webview 环境优先走免登静默授权
+ * 
+ * 检测优先级：
+ * 1. JSAPI 是否已注入（window.lark/tt/ft）
+ * 2. User-Agent 是否包含飞书标识（最可靠的初筛）
+ * 3. URL 参数是否包含飞书特有参数
  */
 export function isInFeishuWebview(): boolean {
   if (typeof window === 'undefined') return false;
 
-  const ua = navigator.userAgent.toLowerCase();
+  // 1. 优先检查 JSAPI 是否已注入（最可靠的标志）
+  if ((window as any).lark || (window as any).tt || (window as any).ft) {
+    return true;
+  }
 
-  // 飞书客户端 Webview
-  const isLarkClient = ua.includes('feishu') || ua.includes('larksuite');
-  // 飞书小程序 webview
-  const isLarkMiniProgram = !!(window as any).my;
+  // 2. 检查 User-Agent（最可靠的初筛，不受 JSAPI 注入时机影响）
+  if (isFeishuClientByUA()) {
+    return true;
+  }
 
-  // 检查是否在飞书 App 环境中
-  const isInLarkApp = isLarkClient || isLarkMiniProgram;
+  // 3. 检查是否是飞书小程序环境
+  if ((window as any).my) {
+    return true;
+  }
 
-  // 如果在飞书环境中，还要检查是否通过飞书客户端打开
-  // 飞书 Webview 会设置特定的 referrer 或通过 URL 参数传递信息
+  // 4. 检查 URL 参数（从飞书跳转来时会带一些参数）
   const searchParams = new URLSearchParams(window.location.search);
   const hasLarkParams = searchParams.has('from_lark') ||
                          searchParams.has('app_id') ||
                          searchParams.has('block_id');
 
-  return isInLarkApp || hasLarkParams;
+  return hasLarkParams;
 }
 
 /**

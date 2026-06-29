@@ -10,19 +10,40 @@
 
 import { getTenantAccessToken } from './client';
 import { getCurrentTimestampSeconds } from '@/constants/app-constants';
+import { createHash } from 'crypto';
 
-const AUTH_API_BASE = 'https://open.feishu.cn/open-apis/authen/v1';
+const AUTH_API_BASE = 'https://accounts.feishu.cn/open-apis/authen/v1';
+const TENANT_TOKEN_API = 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal';
+const JSAPI_TICKET_API = 'https://open.feishu.cn/open-apis/jssdk/ticket/get';
 
 /**
- * 获取飞书应用配置
+ * 飞书应用配置
  */
-function getAppConfig(): { appId: string; appSecret: string } {
-  const appId = process.env.FEISHU_APP_ID || '';
-  const appSecret = process.env.FEISHU_APP_SECRET || '';
-  if (!appId || !appSecret) {
-    throw new Error('飞书应用配置缺失，请配置 FEISHU_APP_ID 和 FEISHU_APP_SECRET');
+export interface FeishuAppConfig {
+  appId: string;
+  appSecret: string;
+}
+
+/**
+ * 用 fetch 直接获取 tenant_access_token（不依赖全局 client）
+ * 用于动态配置场景（配置存储在 KV 中，而非环境变量）
+ */
+async function fetchTenantAccessToken(appId: string, appSecret: string): Promise<string> {
+  const response = await fetch(TENANT_TOKEN_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok || data.code !== 0) {
+    const errorMsg = data.msg || `HTTP ${response.status}`;
+    console.error(`【用户授权】获取 tenant_access_token 失败: ${errorMsg}`);
+    throw new Error(`获取 tenant_access_token 失败: ${errorMsg}`);
   }
-  return { appId, appSecret };
+
+  return data.tenant_access_token;
 }
 
 /**
@@ -60,13 +81,46 @@ export interface AuthStatus {
 }
 
 /**
+ * 从环境变量获取飞书应用配置（兼容旧代码）
+ */
+function getAppConfigFromEnv(): FeishuAppConfig {
+  const appId = process.env.FEISHU_APP_ID || '';
+  const appSecret = process.env.FEISHU_APP_SECRET || '';
+  if (!appId || !appSecret) {
+    throw new Error('飞书应用配置缺失，请配置 FEISHU_APP_ID 和 FEISHU_APP_SECRET');
+  }
+  return { appId, appSecret };
+}
+
+/**
+ * 解析飞书应用配置：优先使用传入的配置，否则从环境变量读取
+ */
+function resolveAppConfig(appConfig?: FeishuAppConfig): FeishuAppConfig {
+  if (appConfig?.appId && appConfig?.appSecret) {
+    return appConfig;
+  }
+  return getAppConfigFromEnv();
+}
+
+/**
+ * 获取 tenant_access_token：优先使用传入的配置，否则用全局 client
+ */
+async function resolveTenantToken(appConfig?: FeishuAppConfig): Promise<string> {
+  if (appConfig?.appId && appConfig?.appSecret) {
+    return fetchTenantAccessToken(appConfig.appId, appConfig.appSecret);
+  }
+  return getTenantAccessToken();
+}
+
+/**
  * 生成飞书 OAuth 授权 URL
  * @param redirectUri 授权回调地址
  * @param state 状态参数，用于防止 CSRF
+ * @param appConfig 飞书应用配置（可选，不传则从环境变量读取）
  */
-export function getAuthorizationUrl(redirectUri: string, state?: string): string {
-  const config = getAppConfig();
-  const appId = config.appId;
+export function getAuthorizationUrl(redirectUri: string, state?: string, appConfig?: FeishuAppConfig): string {
+  const config = resolveAppConfig(appConfig);
+  const clientId = config.appId;
   
   // 生成随机 state
   const stateParam = state || generateState();
@@ -74,18 +128,29 @@ export function getAuthorizationUrl(redirectUri: string, state?: string): string
   // URL 编码回调地址
   const encodedRedirectUri = encodeURIComponent(redirectUri);
   
-  // 授权范围：获取用户基本信息 + 云空间读写 + 多维表格读写
-  const scope = 'contact:user.base:readonly drive:drive bitable:app';
+  // 授权范围：获取用户基本信息 + 云空间读写 + 多维表格读写 + offline_access（获取 refresh_token）
+  const scope = 'contact:user.base:readonly drive:drive bitable:app offline_access';
   
-  return `${AUTH_API_BASE}/authorize?app_id=${appId}&redirect_uri=${encodedRedirectUri}&state=${stateParam}&scope=${scope}`;
+  // 按照飞书 OAuth 规范构建授权 URL
+  // 参考：https://open.feishu.cn/document/common-capabilities/sso/api/obtain-oauth-code
+  const params = new URLSearchParams({
+    client_id: clientId,
+    response_type: 'code',
+    redirect_uri: redirectUri,
+    state: stateParam,
+    scope: scope,
+  });
+  
+  return `${AUTH_API_BASE}/authorize?${params.toString()}`;
 }
 
 /**
  * 用授权码换取 user_access_token
  * @param code 授权回调中的 code
+ * @param appConfig 飞书应用配置（可选，不传则从环境变量读取）
  */
-export async function exchangeCodeForToken(code: string): Promise<UserTokenResponse> {
-  const tenantToken = await getTenantAccessToken();
+export async function exchangeCodeForToken(code: string, appConfig?: FeishuAppConfig): Promise<UserTokenResponse> {
+  const tenantToken = await resolveTenantToken(appConfig);
   
   const response = await fetch(`${AUTH_API_BASE}/access_token`, {
     method: 'POST',
@@ -122,9 +187,10 @@ export async function exchangeCodeForToken(code: string): Promise<UserTokenRespo
 /**
  * 用 refresh_token 刷新 access_token
  * @param refreshToken refresh_token
+ * @param appConfig 飞书应用配置（可选，不传则从环境变量读取）
  */
-export async function refreshAccessToken(refreshToken: string): Promise<UserTokenResponse> {
-  const tenantToken = await getTenantAccessToken();
+export async function refreshAccessToken(refreshToken: string, appConfig?: FeishuAppConfig): Promise<UserTokenResponse> {
+  const tenantToken = await resolveTenantToken(appConfig);
   
   console.log('【用户授权】正在刷新 access_token...');
   
@@ -240,4 +306,82 @@ export async function getValidUserAccessToken(
   }
   
   return { token: accessToken };
+}
+
+/**
+ * JSAPI 配置结构
+ */
+export interface JsapiConfig {
+  appId: string;
+  timestamp: number;
+  nonceStr: string;
+  signature: string;
+  url: string;
+}
+
+/**
+ * 获取 JSAPI ticket
+ * @param appConfig 飞书应用配置
+ */
+async function getJsapiTicket(appConfig: FeishuAppConfig): Promise<string> {
+  const tenantToken = await resolveTenantToken(appConfig);
+
+  const response = await fetch(JSAPI_TICKET_API, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${tenantToken}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok || data.code !== 0) {
+    const errorMsg = data.msg || `HTTP ${response.status}`;
+    console.error(`【用户授权】获取 JSAPI ticket 失败: ${errorMsg}`);
+    throw new Error(`获取 JSAPI ticket 失败: ${errorMsg}`);
+  }
+
+  return data.data.ticket;
+}
+
+/**
+ * 生成随机字符串
+ */
+function generateNonceStr(): string {
+  return Math.random().toString(36).substring(2, 15);
+}
+
+/**
+ * 简单的 SHA1 哈希实现（用于 JSAPI 签名）
+ * 使用 Node.js crypto 模块
+ */
+function sha1(message: string): string {
+  return createHash('sha1').update(message).digest('hex');
+}
+
+/**
+ * 生成 JSAPI 配置（含签名）
+ * 用于前端调用 lark.config 初始化 JSAPI
+ * @param url 当前页面 URL（不含 # 及后面的部分）
+ * @param appConfig 飞书应用配置
+ */
+export async function generateJsapiConfig(url: string, appConfig?: FeishuAppConfig): Promise<JsapiConfig> {
+  const config = resolveAppConfig(appConfig);
+  const ticket = await getJsapiTicket(config);
+
+  const timestamp = getCurrentTimestampSeconds();
+  const nonceStr = generateNonceStr();
+
+  // 签名字符串：jsapi_ticket=xxx&noncestr=xxx&timestamp=xxx&url=xxx
+  const string1 = `jsapi_ticket=${ticket}&noncestr=${nonceStr}&timestamp=${timestamp}&url=${url}`;
+  const signature = sha1(string1);
+
+  return {
+    appId: config.appId,
+    timestamp,
+    nonceStr,
+    signature,
+    url,
+  };
 }

@@ -847,19 +847,49 @@ async function saveConfigV3(config: any) {
 }
 
 // ============================================
+// 测试辅助工具：从 KV 存储读取已保存的配置
+// ============================================
+
+/**
+ * 从 KV 存储获取已保存的配置
+ * 用于 __SET__ 占位符场景下的回退
+ */
+async function getSavedConfigFromKV(): Promise<any> {
+  const ownerId = process.env.DEFAULT_OWNER_ID || 'default_owner';
+  try {
+    return await getConfig(ownerId);
+  } catch (kvError) {
+    console.warn('[getSavedConfigFromKV] 从 KV 存储读取配置失败:', kvError);
+    return null;
+  }
+}
+
+/**
+ * 解析配置值：当前值 -> KV存储 -> 环境变量
+ * 当当前值为 __SET__ 时，从 KV 存储或环境变量获取真实值
+ */
+function resolveConfigValue(
+  currentValue: string | undefined,
+  kvValue: string | undefined,
+  envKey: string
+): string {
+  if (currentValue && currentValue !== '__SET__') {
+    return currentValue;
+  }
+  if (kvValue) return kvValue;
+  return process.env[envKey] || '';
+}
+
+// ============================================
 // 测试飞书应用
 // ============================================
 
 async function testFeishu(feishuConfig: any) {
-  // 将 __SET__ 占位符视为未填写，回退到环境变量
-  const appId =
-    feishuConfig.appId && feishuConfig.appId !== '__SET__'
-      ? feishuConfig.appId
-      : process.env.FEISHU_APP_ID
-  const appSecret =
-    feishuConfig.appSecret && feishuConfig.appSecret !== '__SET__'
-      ? feishuConfig.appSecret
-      : process.env.FEISHU_APP_SECRET
+  const kvConfig = await getSavedConfigFromKV();
+
+  // 解析配置：当前值 -> KV存储 -> 环境变量
+  const appId = resolveConfigValue(feishuConfig.appId, kvConfig?.feishu?.appId, 'FEISHU_APP_ID');
+  const appSecret = resolveConfigValue(feishuConfig.appSecret, kvConfig?.feishu?.appSecret, 'FEISHU_APP_SECRET');
 
   if (!appId || !appSecret) {
     return NextResponse.json(
@@ -908,13 +938,14 @@ async function testFeishu(feishuConfig: any) {
 // ============================================
 
 async function testAI(aiConfig: any) {
+  const kvConfig = await getSavedConfigFromKV();
   const provider = aiConfig.provider || 'agnesai';
   try {
     const mapped: any = {
       provider,
-      apiKey: aiConfig.apiKey && aiConfig.apiKey !== '__SET__' ? aiConfig.apiKey : process.env.AGNESAI_API_KEY || '',
-      baseUrl: aiConfig.baseUrl || process.env.AGNESAI_BASE_URL || '',
-      model: aiConfig.model || process.env.AGNESAI_MODEL || 'agnes-2.0-flash',
+      apiKey: resolveConfigValue(aiConfig.apiKey, kvConfig?.ai?.apiKey, 'AGNESAI_API_KEY'),
+      baseUrl: aiConfig.baseUrl || kvConfig?.ai?.baseUrl || process.env.AGNESAI_BASE_URL || '',
+      model: aiConfig.model || kvConfig?.ai?.model || process.env.AGNESAI_MODEL || 'agnes-2.0-flash',
     };
     const llm = LLMProviderFactory.create(mapped);
     const result = await llm.testConnection();
@@ -932,15 +963,13 @@ async function testAI(aiConfig: any) {
 // ============================================
 
 async function testDataSource(dsConfig: any) {
+  const kvConfig = await getSavedConfigFromKV();
   try {
     const mapped: any = {
       type: 'api',
-      apiUrl: dsConfig.apiUrl || process.env.DATA_SOURCE_API_URL || '',
-      apiKey:
-        dsConfig.apiKey && dsConfig.apiKey !== '__SET__'
-          ? dsConfig.apiKey
-          : process.env.DATA_SOURCE_API_KEY || '',
-      queryParams: dsConfig.queryParams || process.env.DATA_SOURCE_QUERY_PARAMS || '{}',
+      apiUrl: dsConfig.apiUrl || kvConfig?.dataSource?.apiUrl || process.env.DATA_SOURCE_API_URL || '',
+      apiKey: resolveConfigValue(dsConfig.apiKey, kvConfig?.dataSource?.apiKey, 'DATA_SOURCE_API_KEY'),
+      queryParams: dsConfig.queryParams || kvConfig?.dataSource?.queryParams || process.env.DATA_SOURCE_QUERY_PARAMS || '{}',
       timeRule: dsConfig.timeRule || 'lastWeek',
     };
     if (!mapped.apiUrl) {
@@ -965,9 +994,10 @@ async function testDataSource(dsConfig: any) {
 // ============================================
 
 async function testNotify(body: any) {
+  const kvConfig = await getSavedConfigFromKV();
   const config = body.config || body.notification || {};
   const feishu = body.feishu || {};
-  const chatIdsRaw = config.chatIds || process.env.NOTIFICATION_CHAT_ID || '';
+  const chatIdsRaw = config.chatIds || kvConfig?.notification?.chatIds || process.env.NOTIFICATION_CHAT_ID || '';
   const chatIds = String(chatIdsRaw)
     .split(',')
     .map((s) => s.trim())
@@ -980,10 +1010,8 @@ async function testNotify(body: any) {
     );
   }
 
-  const appId = feishu.appId || process.env.FEISHU_APP_ID || '';
-  const appSecret = feishu.appSecret && feishu.appSecret !== '__SET__'
-    ? feishu.appSecret
-    : process.env.FEISHU_APP_SECRET || '';
+  const appId = resolveConfigValue(feishu.appId, kvConfig?.feishu?.appId, 'FEISHU_APP_ID');
+  const appSecret = resolveConfigValue(feishu.appSecret, kvConfig?.feishu?.appSecret, 'FEISHU_APP_SECRET');
 
   try {
     // 简单发送一条测试文本消息

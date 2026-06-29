@@ -188,6 +188,18 @@ export interface AuthUrlResponse {
   };
 }
 
+export interface JsapiConfigResponse {
+  success: boolean;
+  error?: string;
+  data?: {
+    appId: string;
+    timestamp: number;
+    nonceStr: string;
+    signature: string;
+    url: string;
+  };
+}
+
 /**
  * 获取用户授权状态
  */
@@ -202,6 +214,14 @@ export async function getAuthStatus(): Promise<AuthStatusResponse> {
 export async function getAuthUrl(): Promise<AuthUrlResponse> {
   const response = await fetch('/api/user-resource?action=auth-url');
   return response.json() as Promise<AuthUrlResponse>;
+}
+
+/**
+ * 获取 JSAPI 配置（用于飞书 Webview 环境）
+ */
+export async function getJsapiConfig(url: string): Promise<JsapiConfigResponse> {
+  const response = await fetch(`/api/user-resource?action=jsapi-config&url=${encodeURIComponent(url)}`);
+  return response.json() as Promise<JsapiConfigResponse>;
 }
 
 /**

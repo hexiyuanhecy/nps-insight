@@ -16,14 +16,53 @@ import {
   exchangeCodeForToken,
   getUserInfo,
   refreshAccessToken,
+  generateJsapiConfig,
+  type FeishuAppConfig,
 } from '@/lib/feishu/user-auth';
+import { getConfig } from '@/lib/storage/kv-storage';
 import { getCurrentTimestampSeconds } from '@/constants/app-constants';
 
 /**
+ * 从 KV 配置中获取飞书应用配置
+ * 优先从 KV 存储读取（用户在配置中心设置的），兜底用环境变量
+ */
+async function getFeishuAppConfig(): Promise<FeishuAppConfig> {
+  const ownerId = process.env.DEFAULT_OWNER_ID || 'default_owner';
+  try {
+    const config = await getConfig(ownerId);
+    const feishuConfig = config?.feishu as { appId?: string; appSecret?: string } | undefined;
+    if (feishuConfig?.appId && feishuConfig?.appSecret) {
+      return {
+        appId: feishuConfig.appId,
+        appSecret: feishuConfig.appSecret,
+      };
+    }
+  } catch (e) {
+    console.warn('[user-resource] 从 KV 读取飞书配置失败，回退到环境变量:', e);
+  }
+  // 兜底：从环境变量读取
+  const appId = process.env.FEISHU_APP_ID || '';
+  const appSecret = process.env.FEISHU_APP_SECRET || '';
+  if (!appId || !appSecret) {
+    throw new Error('飞书应用配置缺失，请在配置中心设置 App ID 和 App Secret');
+  }
+  return { appId, appSecret };
+}
+
+/**
  * 获取授权回调地址
+ * 优先从 X-Forwarded-Host 获取真实域名（用于反向代理/云函数场景）
  */
 function getRedirectUri(request: NextRequest): string {
   const url = new URL(request.url);
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  
+  if (forwardedHost) {
+    const protocol = forwardedProto || url.protocol || 'https';
+    return `${protocol}://${forwardedHost}/api/user-resource/auth/callback`;
+  }
+  
   const origin = url.origin;
   return `${origin}/api/user-resource/auth/callback`;
 }
@@ -76,8 +115,9 @@ export async function GET(request: NextRequest) {
 
     // 获取授权URL
     if (action === 'auth-url') {
+      const appConfig = await getFeishuAppConfig();
       const redirectUri = getRedirectUri(request);
-      const authUrl = getAuthorizationUrl(redirectUri);
+      const authUrl = getAuthorizationUrl(redirectUri, undefined, appConfig);
 
       return NextResponse.json({
         success: true,
@@ -86,6 +126,38 @@ export async function GET(request: NextRequest) {
           redirectUri,
         },
       });
+    }
+
+    // 获取 JSAPI 配置（用于飞书 Webview 环境初始化 JSAPI）
+    if (action === 'jsapi-config') {
+      const url = searchParams.get('url');
+      if (!url) {
+        return NextResponse.json(
+          { success: false, error: '缺少 url 参数' },
+          { status: 400 }
+        );
+      }
+
+      try {
+        const appConfig = await getFeishuAppConfig();
+        // 去掉 URL 中的 hash 部分（飞书签名要求）
+        const cleanUrl = url.split('#')[0];
+        const jsapiConfig = await generateJsapiConfig(cleanUrl, appConfig);
+
+        return NextResponse.json({
+          success: true,
+          data: jsapiConfig,
+        });
+      } catch (error) {
+        console.error('[API] 获取 JSAPI 配置失败:', error);
+        return NextResponse.json(
+          {
+            success: false,
+            error: error instanceof Error ? error.message : '未知错误',
+          },
+          { status: 500 }
+        );
+      }
     }
 
     // 默认：获取用户资源状态
@@ -135,8 +207,10 @@ export async function POST(request: NextRequest) {
       console.log('【API】用户授权回调处理');
       console.log('='.repeat(60) + '\n');
 
+      const appConfig = await getFeishuAppConfig();
+
       // 用 code 换取 token
-      const tokenResponse = await exchangeCodeForToken(code);
+      const tokenResponse = await exchangeCodeForToken(code, appConfig);
 
       // 获取用户信息
       const userInfo = await getUserInfo(tokenResponse.access_token);
