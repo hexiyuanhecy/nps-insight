@@ -228,7 +228,7 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
             <p className="text-sm text-slate-500">正在加载资源状态...</p>
           </div>
-        ) : resourceExists && userResource ? (
+        ) : resourceExists && userResource && (userResource.rootFolderToken || userResource.bitableBaseToken) ? (
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-3">

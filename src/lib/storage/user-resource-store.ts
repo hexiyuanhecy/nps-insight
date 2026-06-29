@@ -184,10 +184,11 @@ export class LocalUserResourceStore implements UserResourceStore {
 
   /**
    * 判断资源是否已初始化
+   * 必须有实际的云资源（根文件夹或多维表格）才算已初始化
    */
   async exists(): Promise<boolean> {
     const resource = await this.get();
-    return resource !== null;
+    return resource !== null && !!(resource.rootFolderToken || resource.bitableBaseToken);
   }
 
   /**
@@ -301,10 +302,11 @@ export class KvUserResourceStore implements UserResourceStore {
 
   /**
    * 判断资源是否已初始化
+   * 必须有实际的云资源（根文件夹或多维表格）才算已初始化
    */
   async exists(): Promise<boolean> {
     const resource = await this.get();
-    return resource !== null && resource.userOpenId !== undefined;
+    return resource !== null && !!(resource.rootFolderToken || resource.bitableBaseToken);
   }
 
   /**
