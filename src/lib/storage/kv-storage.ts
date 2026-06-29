@@ -405,6 +405,7 @@ export function getStorageStatus(): { redis: boolean; memory: number } {
 
 /**
  * 获取值
+ * 注意：Upstash Redis 会自动 JSON 解析值，返回的可能是对象而非字符串
  */
 export async function getValue(key: string): Promise<string | null> {
   const client = getRedisClient();
@@ -416,6 +417,11 @@ export async function getValue(key: string): Promise<string | null> {
   try {
     const result = await client.get(key);
     if (result === null) return null;
+    // Upstash Redis 可能自动 JSON 解析，返回对象而非字符串
+    // 如果是对象，转成 JSON 字符串，保持接口一致性
+    if (typeof result === 'object') {
+      return JSON.stringify(result);
+    }
     return String(result);
   } catch {
     return memoryCache.get(key) ?? null;
