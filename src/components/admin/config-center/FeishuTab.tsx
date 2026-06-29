@@ -102,14 +102,14 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
             value={config.feishu.appSecret}
             onSave={ctrl.savePartial}
             getValueFromDOM={() => {
-              // SecretField在已保存状态下显示空值+placeholder"已配置"
-              // 如果用户没有输入新值，返回__SET__表示保持原有密钥
+              // SecretField在已保存状态下显示掩码+data-saved属性
+              // 如果data-saved为true且值还是掩码，返回__SET__表示保持原有密钥
               const section = document.querySelector('[data-section="feishu-app-bind"]');
               if (!section) return undefined;
               const input = section.querySelector('input[type="password"]') as HTMLInputElement;
               if (!input) return undefined;
-              // 如果输入为空且placeholder包含"已配置"，保持原值
-              if (input.value === '' && input.placeholder.includes('已配置')) {
+              // 如果data-saved为true且值还是掩码，保持原值
+              if (input.dataset.saved === 'true' && input.value === '••••••••') {
                 return '__SET__';
               }
               return input.value;

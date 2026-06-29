@@ -110,7 +110,7 @@ export function TaggingTab({ ctrl }: TaggingTabProps) {
               if (!section) return undefined;
               const input = section.querySelector('input[type="password"]') as HTMLInputElement;
               if (!input) return undefined;
-              if (input.value === '' && input.placeholder.includes('已配置')) {
+              if (input.dataset.saved === 'true' && input.value === '••••••••') {
                 return '__SET__';
               }
               return input.value;

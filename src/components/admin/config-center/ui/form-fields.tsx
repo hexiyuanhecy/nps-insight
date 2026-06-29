@@ -71,15 +71,32 @@ export function SecretField({
 
   // auto 模式：直接显示输入框 + 显示/隐藏按钮，由外部处理保存
   if (mode === 'auto') {
+    const isSaved = value === '__SET__';
+    const displayValue = isSaved ? '••••••••' : value;
+
     return (
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}</label>
         <div className="flex items-center gap-2">
           <input
             type={visible ? 'text' : 'password'}
-            value={value === '__SET__' ? '' : value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={value === '__SET__' ? '已配置，留空则不修改' : placeholder}
+            value={displayValue}
+            data-saved={isSaved ? 'true' : 'false'}
+            onChange={(e) => {
+              // 如果是已保存状态，用户第一次输入时清空掩码
+              if (isSaved) {
+                onChange(e.target.value === '••••••••' ? '' : e.target.value);
+              } else {
+                onChange(e.target.value);
+              }
+            }}
+            onFocus={(e) => {
+              // 聚焦时如果是掩码状态，全选文本方便用户直接输入覆盖
+              if (isSaved) {
+                e.target.select();
+              }
+            }}
+            placeholder={isSaved ? '已配置，输入新值将覆盖原有密钥' : placeholder}
             disabled={disabled}
             className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
           />
