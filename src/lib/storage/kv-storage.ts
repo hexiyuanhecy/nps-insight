@@ -400,3 +400,44 @@ export function getStorageStatus(): { redis: boolean; memory: number } {
     memory: memoryCache.size,
   };
 }
+
+// ==================== 通用键值操作 ====================
+
+/**
+ * 获取值
+ */
+export async function getValue(key: string): Promise<string | null> {
+  const client = getRedisClient();
+
+  if (!client) {
+    return memoryCache.get(key) ?? null;
+  }
+
+  try {
+    const result = await client.get(key);
+    if (result === null) return null;
+    return String(result);
+  } catch {
+    return memoryCache.get(key) ?? null;
+  }
+}
+
+/**
+ * 设置值
+ */
+export async function setValue(key: string, value: string): Promise<boolean> {
+  const client = getRedisClient();
+
+  if (!client) {
+    memoryCache.set(key, value);
+    return true;
+  }
+
+  try {
+    await client.set(key, value);
+    return true;
+  } catch {
+    memoryCache.set(key, value);
+    return true;
+  }
+}

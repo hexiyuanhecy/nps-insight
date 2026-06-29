@@ -201,9 +201,146 @@ export class LocalUserResourceStore implements UserResourceStore {
 }
 
 /**
+ * KV 持久化用户资源存储
+ * 使用 Upstash Redis 持久化存储用户资源
+ */
+export class KvUserResourceStore implements UserResourceStore {
+  private ownerId: string;
+
+  constructor(ownerId: string = 'default_owner') {
+    this.ownerId = ownerId;
+  }
+
+  private getStorageKey(): string {
+    return `user_resource:${this.ownerId}`;
+  }
+
+  /**
+   * 从 KV 存储获取用户资源
+   */
+  async get(): Promise<UserResource | null> {
+    const { getValue, setValue } = await import('@/lib/storage/kv-storage');
+    const data = await getValue(this.getStorageKey());
+    if (!data) return null;
+    try {
+      return JSON.parse(data) as UserResource;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 保存用户资源到 KV 存储
+   */
+  async save(resource: UserResource): Promise<void> {
+    const { getValue, setValue } = await import('@/lib/storage/kv-storage');
+    // 先获取现有资源，合并更新
+    const existing = await this.get();
+    const merged: UserResource = {
+      ...existing,
+      ...resource,
+    };
+    await setValue(this.getStorageKey(), JSON.stringify(merged));
+    console.log('[KV用户资源] 资源已保存到 KV 存储');
+  }
+
+  /**
+   * 保存用户授权Token
+   */
+  async saveUserToken(accessToken: string, refreshToken: string, expiresIn: number): Promise<void> {
+    const expiresAt = getCurrentTimestampSeconds() + expiresIn;
+    await this.save({
+      rootFolderToken: '',
+      reportFolderToken: '',
+      monthFolderToken: '',
+      bitableBaseToken: '',
+      userAccessToken: accessToken,
+      refreshToken: refreshToken,
+      tokenExpiresAt: expiresAt,
+    });
+    console.log('[KV用户资源] 用户Token已保存到 KV 存储');
+  }
+
+  /**
+   * 获取有效的用户 access_token
+   */
+  async getValidAccessToken(): Promise<string | null> {
+    const resource = await this.get();
+    if (!resource?.userAccessToken || !resource?.tokenExpiresAt) {
+      return null;
+    }
+    const now = getCurrentTimestampSeconds();
+    if (resource.tokenExpiresAt - now < 600) {
+      console.log('[KV用户资源] Token即将过期，需要刷新');
+      return null;
+    }
+    return resource.userAccessToken;
+  }
+
+  /**
+   * 获取 refresh_token
+   */
+  async getRefreshToken(): Promise<string | null> {
+    const resource = await this.get();
+    return resource?.refreshToken || null;
+  }
+
+  /**
+   * 清除用户授权Token
+   */
+  async clearUserToken(): Promise<void> {
+    const resource = await this.get();
+    if (resource) {
+      resource.userAccessToken = undefined;
+      resource.refreshToken = undefined;
+      resource.tokenExpiresAt = undefined;
+      await this.save(resource);
+    }
+    console.log('[KV用户资源] 已清除用户Token');
+  }
+
+  /**
+   * 判断资源是否已初始化
+   */
+  async exists(): Promise<boolean> {
+    const resource = await this.get();
+    return resource !== null && resource.userOpenId !== undefined;
+  }
+
+  /**
+   * 判断用户是否已授权
+   */
+  async isUserAuthorized(): Promise<boolean> {
+    const accessToken = await this.getValidAccessToken();
+    const refreshToken = await this.getRefreshToken();
+    return !!(accessToken && refreshToken);
+  }
+}
+
+/**
+ * 检查是否启用 KV 存储
+ */
+function isKvStorageEnabled(): boolean {
+  return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
+
+/**
+ * 获取默认 ownerId
+ */
+function getDefaultOwnerId(): string {
+  return process.env.DEFAULT_OWNER_ID || 'default_owner';
+}
+
+/**
  * 创建用户资源存储实例
- * 当前默认使用本地环境实现
+ * - 有 KV 配置时使用 KV 持久化存储
+ * - 否则使用 LocalUserResourceStore（仅内存）
  */
 export function createUserResourceStore(): UserResourceStore {
+  if (isKvStorageEnabled()) {
+    console.log('[用户资源存储] 使用 KV 持久化存储');
+    return new KvUserResourceStore(getDefaultOwnerId());
+  }
+  console.log('[用户资源存储] 使用本地内存存储（仅适合开发环境）');
   return new LocalUserResourceStore();
 }

@@ -85,7 +85,7 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
               用于调用飞书开放平台 API、发送机器人消息、创建多维表格。<a href="https://open.feishu.cn/document/faq/trouble-shooting/how-to-obtain-app-id" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">如何获取 App ID？</a>
             </p>
           </div>
-          <StatusBadge status={config.feishu.appId && config.feishu.appSecret ? 'ok' : 'warn'} text={config.feishu.appId ? '已配置' : '未配置'} />
+          <StatusBadge status={config.feishu.appId && config.feishu.appSecret ? 'ok' : 'warn'} text={config.feishu.appId && config.feishu.appSecret ? '已配置' : '未配置'} />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <AutoSaveField fieldPath="feishu.appId" value={config.feishu.appId} onSave={ctrl.savePartial}>
