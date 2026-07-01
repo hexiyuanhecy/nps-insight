@@ -83,7 +83,7 @@ export class FeishuNotificationAdapter implements NotificationAdapter {
     try {
       const token = await getTenantAccessToken();
       
-      const response = await fetch(`${FEISHU_API_BASE}/im/v1/messages`, {
+      const response = await fetch(`${FEISHU_API_BASE}/im/v1/messages?receive_id_type=chat_id`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -100,7 +100,6 @@ export class FeishuNotificationAdapter implements NotificationAdapter {
               },
             },
           }),
-          receive_id_type: 'chat_id',
         }),
       });
       

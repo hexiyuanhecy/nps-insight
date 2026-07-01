@@ -3,7 +3,7 @@
  * 首次启动时自动创建多维表格及所需表结构
  */
 
-import { getTenantAccessToken } from './client';
+import { getTenantAccessToken, getTenantAccessTokenAsync } from './client';
 import { TABLE_DEFINITIONS, TABLE_NAMES } from './constants';
 import { bitableClient } from './bitable';
 
@@ -32,11 +32,22 @@ export interface SetupResult {
 /**
  * 创建新的多维表格
  * @param name 多维表格名称
+ * @param ownerId 用户ID，不传则使用环境变量
  * @returns 多维表格Token
  */
-export async function createBitable(name: string = 'NPS Insight 数据'): Promise<string> {
+export async function createBitable(
+  name: string = 'NPS Insight 数据',
+  ownerId?: string
+): Promise<string> {
   try {
-    const token = await getTenantAccessToken();
+    // 优先使用异步方式获取 token（从 KV 读配置）
+    let token: string;
+    if (ownerId) {
+      token = await getTenantAccessTokenAsync(ownerId);
+    } else {
+      token = await getTenantAccessToken();
+    }
+
     const response = await fetch(`${BITABLE_API_BASE}/apps`, {
       method: 'POST',
       headers: {
@@ -115,11 +126,12 @@ export async function initializeTables(
  * 1. 创建多维表格
  * 2. 创建所有表
  * 3. 初始化默认配置
+ * @param ownerId 用户ID，不传则使用环境变量
  * @returns 初始化结果
  */
-export async function runSetup(): Promise<SetupResult> {
+export async function runSetup(ownerId?: string): Promise<SetupResult> {
   try {
-    console.log('[Setup] 开始系统初始化...');
+    console.log('[Setup] 开始系统初始化...', ownerId ? `(owner: ${ownerId})` : '');
 
     // 检查是否已配置BITABLE_TOKEN
     const existingToken = process.env.BITABLE_TOKEN;
@@ -144,7 +156,7 @@ export async function runSetup(): Promise<SetupResult> {
       }
     } else {
       // 创建新的多维表格
-      bitableToken = await createBitable();
+      bitableToken = await createBitable('NPS Insight 数据', ownerId);
     }
 
     // 创建表结构

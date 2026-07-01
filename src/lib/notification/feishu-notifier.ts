@@ -10,7 +10,7 @@ export async function sendNotification(chatId: string, message: string): Promise
   try {
     const token = await getTenantAccessToken();
 
-    const response = await fetch(`${FEISHU_API_BASE}/im/v1/messages`, {
+    const response = await fetch(`${FEISHU_API_BASE}/im/v1/messages?receive_id_type=chat_id`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -20,7 +20,6 @@ export async function sendNotification(chatId: string, message: string): Promise
         receive_id: chatId,
         msg_type: 'text',
         content: JSON.stringify({ text: message }),
-        receive_id_type: 'chat_id',
       }),
     });
 
@@ -41,7 +40,7 @@ export async function sendCardNotification(chatId: string, card: any): Promise<b
   try {
     const token = await getTenantAccessToken();
 
-    const response = await fetch(`${FEISHU_API_BASE}/im/v1/messages`, {
+    const response = await fetch(`${FEISHU_API_BASE}/im/v1/messages?receive_id_type=chat_id`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -51,7 +50,6 @@ export async function sendCardNotification(chatId: string, card: any): Promise<b
         receive_id: chatId,
         msg_type: 'interactive',
         content: JSON.stringify(card),
-        receive_id_type: 'chat_id',
       }),
     });
 

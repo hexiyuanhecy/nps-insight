@@ -62,7 +62,7 @@ export const FEEDBACK_FIELDS = {
 export const FEEDBACK_FIELD_DEFS: BitableField[] = [
   { field_name: FEEDBACK_FIELDS.FEEDBACK_ID, field_type: 'Text' },
   { field_name: FEEDBACK_FIELDS.TENANT_ID, field_type: 'Text' },
-  { field_name: FEEDBACK_FIELDS.TENANT_NAME, field_type: 'AutoNumber' },
+  { field_name: FEEDBACK_FIELDS.TENANT_NAME, field_type: 'Text' },
   {
     field_name: FEEDBACK_FIELDS.TENANT_SCALE,
     field_type: 'SingleSelect',
@@ -157,7 +157,7 @@ export const TAG_FIELD_DEFS: BitableField[] = [
   { field_name: 'tagId', field_type: 'Text' },
   { field_name: 'tagName', field_type: 'Text' },
   { field_name: 'desc', field_type: 'Text' },
-  { field_name: 'count', field_type: 'AutoNumber' },
+  { field_name: 'count', field_type: 'Number' },
 ];
 
 // ============================================
@@ -223,7 +223,7 @@ export const TOP_ISSUES_FIELDS = {
 /** Top问题表字段定义（用于自动建表）—— 与目标多维表格"top 问题表"严格对齐（共15个字段） */
 export const TOP_ISSUES_FIELD_DEFS: BitableField[] = [
   { field_name: TOP_ISSUES_FIELDS.INDEX, field_type: 'Text' },
-  { field_name: TOP_ISSUES_FIELDS.MODULE, field_type: 'AutoNumber' },
+  { field_name: TOP_ISSUES_FIELDS.MODULE, field_type: 'Text' },
   {
     field_name: TOP_ISSUES_FIELDS.TAG2,
     field_type: 'SingleSelect',
@@ -231,12 +231,12 @@ export const TOP_ISSUES_FIELD_DEFS: BitableField[] = [
       options: [],
     },
   },
-  { field_name: TOP_ISSUES_FIELDS.TAG3, field_type: 'AutoNumber' },
-  { field_name: TOP_ISSUES_FIELDS.TOTAL_COUNT, field_type: 'AutoNumber' },
-  { field_name: TOP_ISSUES_FIELDS.A4_COUNT, field_type: 'AutoNumber' },
-  { field_name: TOP_ISSUES_FIELDS.A5_COUNT, field_type: 'AutoNumber' },
-  { field_name: TOP_ISSUES_FIELDS.A6_COUNT, field_type: 'AutoNumber' },
-  { field_name: TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT, field_type: 'AutoNumber' },
+  { field_name: TOP_ISSUES_FIELDS.TAG3, field_type: 'Text' },
+  { field_name: TOP_ISSUES_FIELDS.TOTAL_COUNT, field_type: 'Number' },
+  { field_name: TOP_ISSUES_FIELDS.A4_COUNT, field_type: 'Number' },
+  { field_name: TOP_ISSUES_FIELDS.A5_COUNT, field_type: 'Number' },
+  { field_name: TOP_ISSUES_FIELDS.A6_COUNT, field_type: 'Number' },
+  { field_name: TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT, field_type: 'Number' },
   { field_name: TOP_ISSUES_FIELDS.LARGE_TENANT_RATIO, field_type: 'Formula' },
   { field_name: TOP_ISSUES_FIELDS.MANUAL_PRIORITY, field_type: 'Number', property: { formatter: '0.0' } },
   { field_name: TOP_ISSUES_FIELDS.OWNER, field_type: 'Text' },
@@ -296,7 +296,7 @@ export const TAG1_FIELD_DEFS: BitableField[] = [
     },
   },
   { field_name: 'desc', field_type: 'Text' },
-  { field_name: 'count', field_type: 'AutoNumber' },
+  { field_name: 'count', field_type: 'Number' },
 ];
 
 // ============================================
@@ -320,7 +320,7 @@ export const TAG2_FIELD_DEFS: BitableField[] = [
     },
   },
   { field_name: 'desc', field_type: 'Text' },
-  { field_name: 'count', field_type: 'AutoNumber' },
+  { field_name: 'count', field_type: 'Number' },
 ];
 
 // ============================================
@@ -344,7 +344,7 @@ export const TAG3_FIELD_DEFS: BitableField[] = [
     },
   },
   { field_name: 'desc', field_type: 'Text' },
-  { field_name: 'count', field_type: 'AutoNumber' },
+  { field_name: 'count', field_type: 'Number' },
 ];
 // ============================================
 // 表结构汇总（用于自动建表）

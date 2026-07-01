@@ -5,13 +5,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { getTenantAccessToken } from './client';
+import { getTenantAccessTokenAsync } from './client';
 import { refreshAccessToken } from './user-auth';
 import { getCurrentTimestampSeconds } from '@/constants/app-constants';
 
 const BITABLE_API_BASE = 'https://open.feishu.cn/open-apis/bitable/v1';
 
-const REQUEST_DELAY_MS = 300;
+const REQUEST_DELAY_MS = 100;
 const MAX_RETRIES = 3;
 
 /**
@@ -46,7 +46,7 @@ async function getAccessToken(
   }
 
   // 使用应用身份
-  return getTenantAccessToken();
+  return getTenantAccessTokenAsync();
 }
 
 export const TENANT_SCALE_OPTIONS = [
@@ -933,7 +933,7 @@ export async function validateAndGetBitableInfo(appToken: string): Promise<{
   message?: string;
 }> {
   try {
-    const token = await getTenantAccessToken();
+    const token = await getTenantAccessTokenAsync();
     const data = await feishuRequest(
       `${BITABLE_API_BASE}/apps/${appToken}/tables`,
       { method: 'GET' },
@@ -969,23 +969,42 @@ export async function validateAndGetBitableInfo(appToken: string): Promise<{
 export function checkRequiredFields(tables: Array<{ table_id: string; name: string }>): {
   feedbackTableId: string;
   tagsTableId: string;
+  tag1TableId: string;
+  tag2TableId: string;
+  tag3TableId: string;
   tenantsTableId: string;
   analysisTableId: string;
+  topIssuesTableId: string;
   hasFeedbackTable: boolean;
   missingFields: string[];
 } {
-  const feedbackTable = tables.find(t => t.name === '反馈列表');
-  const tag1Table = tables.find(t => t.name === 'Tag1表');
-  const tag2Table = tables.find(t => t.name === 'Tag2表');
-  const tag3Table = tables.find(t => t.name === 'Tag3表');
-  const tenantTable = tables.find(t => t.name === '租户信息');
-  const periodTable = tables.find(t => t.name === 'top 问题表');
+  // 模糊匹配表名，支持多种命名方式
+  const findTable = (keywords: string[]) => {
+    return tables.find(t => 
+      keywords.some(kw => t.name.includes(kw) || t.name === kw)
+    );
+  };
+
+  const feedbackTable = findTable(['反馈列表', '反馈表', 'feedback', 'Feedback']);
+  const tag1Table = findTable(['Tag1', 'tag1', '一级标签', '一级']);
+  const tag2Table = findTable(['Tag2', 'tag2', '二级标签', '二级']);
+  const tag3Table = findTable(['Tag3', 'tag3', '三级标签', '三级']);
+  const tenantTable = findTable(['租户信息', '租户表', 'tenant', 'Tenant']);
+  const topIssuesTable = findTable(['top 问题', 'Top问题', 'top问题', '问题表', 'Top 问题']);
+  const analysisTable = findTable(['周期分析', '分析表', 'analysis', 'Analysis']);
+
+  // Top问题表也可以作为分析表使用
+  const effectiveAnalysisTable = analysisTable || topIssuesTable;
 
   return {
     feedbackTableId: feedbackTable?.table_id || '',
     tagsTableId: tag1Table?.table_id || tag2Table?.table_id || tag3Table?.table_id || '',
+    tag1TableId: tag1Table?.table_id || '',
+    tag2TableId: tag2Table?.table_id || '',
+    tag3TableId: tag3Table?.table_id || '',
     tenantsTableId: tenantTable?.table_id || '',
-    analysisTableId: periodTable?.table_id || '',
+    analysisTableId: effectiveAnalysisTable?.table_id || '',
+    topIssuesTableId: topIssuesTable?.table_id || '',
     hasFeedbackTable: !!feedbackTable,
     missingFields: [],
   };
@@ -1040,7 +1059,7 @@ export async function addBitableAdminMembers(
   appToken: string,
   adminUserIds: string
 ): Promise<{ successCount: number; failCount: number; errors: string[] }> {
-  const token = await getTenantAccessToken();
+  const token = await getTenantAccessTokenAsync();
   const userIds = adminUserIds
     .split(',')
     .map(id => id.trim())

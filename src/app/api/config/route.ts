@@ -14,12 +14,11 @@ import fs from 'fs';
 import path from 'path';
 import { AdapterFactory } from '@/lib/data-sources/adapter-factory';
 import { LLMProviderFactory } from '@/lib/llm/provider-factory';
-import { bitableClient, initializeBitableConfig } from '@/lib/feishu/bitable';
-import { TABLE_NAMES, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
+import { bitableClient, initializeBitableConfig, getFieldTypeNumber } from '@/lib/feishu/bitable';
+import { TABLE_NAMES, FEEDBACK_FIELDS, TABLE_DEFINITIONS } from '@/lib/feishu/constants';
 import { tagger } from '@/lib/ai/tagger';
 import {
   addBitableAdminMembers,
-  createNPSInsightBitable,
   extractAppToken,
   validateAndGetBitableInfo,
   checkRequiredFields,
@@ -27,11 +26,13 @@ import {
   initializeTag1Labels,
   saveTag1ToBitable,
 } from '@/lib/feishu/bitable-setup';
+import { getTenantAccessTokenAsync } from '@/lib/feishu/client';
 import { notifyConfigChange } from '@/lib/notification/delay-notifier';
 import { setConfig, getConfig } from '@/lib/storage/kv-storage';
 import { LocalUserResourceStore } from '@/lib/storage/user-resource-store';
 import { DEFAULT_PAGE_SIZE, DEFAULT_BATCH_SIZE, FIVE_MINUTES_MS } from '@/constants/app-constants';
 import { runSyncTask } from '@/app/api/cron/sync/sync-task';
+import { runMonthlyTask } from '@/lib/monthly-task-runner';
 
 // ============================================
 // 默认配置（当环境变量为空时使用）
@@ -1104,25 +1105,99 @@ async function createBitableAction(data: any) {
       console.log('[创建表格] 使用应用身份创建多维表格');
     }
 
-    const result = await createNPSInsightBitable(
-      data.name || 'NPS Insight 反馈中心',
-      folderToken,
-      userAccessToken,
-      refreshToken,
-      tokenExpiresAt
-    );
+    // 从 KV 读取飞书配置，设置到环境变量（供 bitableClient 使用）
+    const ownerId = process.env.DEFAULT_OWNER_ID || 'default_owner';
+    let kvConfig: any = null;
+    try {
+      kvConfig = await getConfig(ownerId);
+    } catch (kvError) {
+      console.warn('[创建表格] 从 KV 存储读取配置失败:', kvError);
+    }
+    const feishuConfig = kvConfig?.feishu || {};
+    if (feishuConfig?.appId) {
+      process.env.FEISHU_APP_ID = feishuConfig.appId;
+    }
+    if (feishuConfig?.appSecret) {
+      process.env.FEISHU_APP_SECRET = feishuConfig.appSecret;
+    }
 
-    const newUrl = `https://www.feishu.cn/base/${result.appToken}`;
-    notifyConfigChange('bitable', 'appToken', result.appToken);
-    notifyConfigChange('bitable', 'url', newUrl);
+    const appName = data.name || 'NPS Insight 反馈中心';
+    console.log('[创建表格] 开始创建多维表格:', appName);
 
-    const appToken = result.appToken;
+    // 步骤1：创建多维表格（应用身份）
+    // 从 KV 读取配置获取 tenant_access_token
+    const token = await getTenantAccessTokenAsync();
+    console.log('[创建表格] 已获取 tenant_access_token');
+
+    const BITABLE_API_BASE = 'https://open.feishu.cn/open-apis/bitable/v1';
+    const createAppRes = await fetch(`${BITABLE_API_BASE}/apps`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ name: appName }),
+    });
+    const createAppData = await createAppRes.json();
+    if (createAppData.code !== 0) {
+      throw new Error(`创建多维表格失败: ${createAppData.msg}`);
+    }
+    const appToken = createAppData.data?.app?.app_token;
+    if (!appToken) {
+      throw new Error('创建多维表格失败：未返回 app_token');
+    }
+    console.log('[创建表格] 多维表格创建成功，appToken:', appToken);
+
+    // 步骤2：创建所有表和字段（一次性创建带字段的表，速度快）
+    console.log('[创建表格] 开始创建数据表结构...');
+
+    const createdTables: Array<{ tableId: string; name: string }> = [];
+    for (const [tableKey, tableDef] of Object.entries(TABLE_DEFINITIONS)) {
+      console.log(`[创建表格] 创建表: ${tableDef.name} (${tableKey})`);
+      const mappedFields = tableDef.fields.map((f: any) => ({
+        field_name: f.field_name,
+        type: getFieldTypeNumber(f.field_type),
+        property: f.property,
+      }));
+
+      const createTableRes = await fetch(`${BITABLE_API_BASE}/apps/${appToken}/tables`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ table: { name: tableDef.name, fields: mappedFields } }),
+      });
+      const createTableData = await createTableRes.json();
+      if (createTableData.code !== 0) {
+        console.error(`[创建表格] 创建表失败 [${tableDef.name}]，错误:`, JSON.stringify(createTableData));
+        throw new Error(`创建表 ${tableDef.name} 失败: ${createTableData.msg}`);
+      }
+      const tableId = createTableData.data?.table_id || '';
+      createdTables.push({ tableId, name: tableDef.name });
+      console.log(`[创建表格] 表创建成功: ${tableDef.name}, ID: ${tableId}`);
+    }
+    console.log('[创建表格] 数据表创建完成，共', createdTables.length, '张表');
+
+    // 构建返回的表信息
+    const tableMap: Record<string, string> = {};
+    createdTables.forEach((t) => {
+      tableMap[t.name] = t.tableId;
+    });
+
     const tables: any = {
-      feedbackTableId: result.tables?.feedbackTableId || '',
-      tagsTableId: result.tables?.tag1TableId || result.tables?.tag2TableId || result.tables?.tag3TableId || '',
-      tenantsTableId: result.tables?.tenantTableId || '',
-      analysisTableId: result.tables?.periodTableId || '',
+      feedbackTableId: tableMap['反馈表'] || '',
+      tagsTableId: tableMap['Tag1表'] || '',
+      tenantsTableId: tableMap['租户表'] || '',
+      analysisTableId: tableMap['Top问题表'] || '',
+      tag1TableId: tableMap['Tag1表'] || '',
+      tag2TableId: tableMap['Tag2表'] || '',
+      tag3TableId: tableMap['Tag3表'] || '',
     };
+
+    const newUrl = `https://www.feishu.cn/base/${appToken}`;
+    notifyConfigChange('bitable', 'appToken', appToken);
+    notifyConfigChange('bitable', 'url', newUrl);
 
     // 同步更新用户资源中的 bitableBaseToken
     if (userResource) {
@@ -1242,18 +1317,28 @@ async function linkBitableAction(data: any) {
       );
     }
 
-    const validation = await validateAndGetBitableInfo(appToken);
-    if (!validation.valid) {
+    // 宽松校验：只检查表是否存在，不做严格的1:1比对
+    // 因为用户可能自己调整过字段顺序、选项、Lookup等，这些都不影响核心功能
+    const token = await getTenantAccessTokenAsync();
+    const tablesRes = await fetch(`https://open.feishu.cn/open-apis/bitable/v1/apps/${appToken}/tables`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const tablesData = await tablesRes.json();
+    if (tablesData.code !== 0) {
       return NextResponse.json(
-        { success: false, error: validation.message || '表格验证失败' },
+        { success: false, error: `获取表格列表失败: ${tablesData.msg}` },
         { status: 400 }
       );
     }
+    const tableList = (tablesData.data?.items || []).map((t: any) => ({
+      table_id: t.table_id,
+      name: t.name,
+    }));
 
-    const fieldCheck = checkRequiredFields(validation.tables || []);
+    const fieldCheck = checkRequiredFields(tableList);
     if (!fieldCheck.hasFeedbackTable) {
       return NextResponse.json(
-        { success: false, error: '未找到反馈列表表' },
+        { success: false, error: '未找到反馈列表表，请确保表格中有"反馈列表"表' },
         { status: 400 }
       );
     }
@@ -1267,8 +1352,12 @@ async function linkBitableAction(data: any) {
     const tables: any = {
       feedbackTableId: fieldCheck.feedbackTableId || '',
       tagsTableId: fieldCheck.tagsTableId || '',
+      tag1TableId: fieldCheck.tag1TableId || '',
+      tag2TableId: fieldCheck.tag2TableId || '',
+      tag3TableId: fieldCheck.tag3TableId || '',
       tenantsTableId: fieldCheck.tenantsTableId || '',
       analysisTableId: fieldCheck.analysisTableId || '',
+      topIssuesTableId: fieldCheck.topIssuesTableId || '',
     };
 
     // 如果有缺失字段，先补充（同步执行，因为绑定前必须确保字段完整）
@@ -1345,8 +1434,12 @@ async function linkBitableAction(data: any) {
         url: data.url || `https://www.feishu.cn/base/${appToken}`,
         feedbackTableId: tables.feedbackTableId,
         tagsTableId: tables.tagsTableId,
+        tag1TableId: tables.tag1TableId,
+        tag2TableId: tables.tag2TableId,
+        tag3TableId: tables.tag3TableId,
         tenantsTableId: tables.tenantsTableId,
         analysisTableId: tables.analysisTableId,
+        topIssuesTableId: tables.topIssuesTableId,
       },
     }).catch((err) => {
       console.error('[绑定表格] 配置持久化失败:', err instanceof Error ? err.message : '未知错误');
@@ -1424,20 +1517,11 @@ async function runManualSyncAction(config: any) {
 
 async function runMonthlyAnalysisAction(config: any) {
   try {
-    // Proxy to the monthly cron endpoint
-    const port = process.env.PORT || '3000';
-    const cronSecret = process.env.CRON_SECRET;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (cronSecret) headers['Authorization'] = `Bearer ${cronSecret}`;
-    const res = await fetch(`http://localhost:${port}/api/cron/monthly`, {
-      method: 'POST',
-      headers,
-    });
-    const data = await res.json();
+    const result = await runMonthlyTask();
     return NextResponse.json({
-      success: res.ok && data.success,
-      message: res.ok && data.success ? '月分析任务已执行' : '月分析任务执行失败: ' + data.error,
-      data,
+      success: result.success,
+      message: result.success ? '月分析任务已执行' : '月分析任务执行失败: ' + (result.error || '未知错误'),
+      data: result,
     });
   } catch (error) {
     return NextResponse.json(

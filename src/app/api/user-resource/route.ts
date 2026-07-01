@@ -117,7 +117,7 @@ export async function GET(request: NextRequest) {
     if (action === 'auth-url') {
       const appConfig = await getFeishuAppConfig();
       const redirectUri = getRedirectUri(request);
-      const authUrl = getAuthorizationUrl(redirectUri, undefined, appConfig);
+      const authUrl = await getAuthorizationUrl(redirectUri, undefined, appConfig);
 
       return NextResponse.json({
         success: true,

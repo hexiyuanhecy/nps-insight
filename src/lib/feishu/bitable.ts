@@ -65,11 +65,12 @@ async function getConfigFromKV(ownerId?: string, forceRefresh?: boolean): Promis
       const bitable = config.bitable as Record<string, string> || {};
       const kvMapping: Record<string, string> = {
         feedback: bitable.feedbackTableId || '',
-        tag1: bitable.tagsTableId || bitable.tag2TableId || bitable.tag3TableId || '',
-        tag2: bitable.tag2TableId || '',
-        tag3: bitable.tag3TableId || '',
+        tag1: bitable.tag1TableId || bitable.tagsTableId || '',
+        tag2: bitable.tag2TableId || bitable.tagsTableId || '',
+        tag3: bitable.tag3TableId || bitable.tagsTableId || '',
         tenants: bitable.tenantsTableId || '',
-        analysis: bitable.analysisTableId || '',
+        analysis: bitable.analysisTableId || bitable.topIssuesTableId || '',
+        top_issues: bitable.topIssuesTableId || bitable.analysisTableId || '',
       };
       // 合并：KV 优先（因为多用户配置存在 KV），环境变量作为回退
       const merged: Record<string, string> = { ...envMapping };
@@ -128,19 +129,22 @@ async function fetchDynamicTableMapping(): Promise<Record<string, string>> {
     for (const table of data.data.items || []) {
       // 匹配表名（忽略大小写和空格）
       const name = table.name.trim();
-      const nameLower = name.toLowerCase();
+      const nameLower = name.toLowerCase().replace(/\s+/g, '');
 
-      if (nameLower === '反馈列表' || nameLower === '反馈表') {
+      if (nameLower.includes('反馈') && !nameLower.includes('问题') && !nameLower.includes('分析')) {
         mapping.feedback = table.table_id;
-      } else if (nameLower === 'tag1表' || nameLower === 'tag1') {
+      } else if (nameLower === 'tag1表' || nameLower === 'tag1' || nameLower.includes('一级标签')) {
         mapping.tag1 = table.table_id;
-      } else if (nameLower === 'tag2表' || nameLower === 'tag2') {
+      } else if (nameLower === 'tag2表' || nameLower === 'tag2' || nameLower.includes('二级标签')) {
         mapping.tag2 = table.table_id;
-      } else if (nameLower === 'tag3表' || nameLower === 'tag3') {
+      } else if (nameLower === 'tag3表' || nameLower === 'tag3' || nameLower.includes('三级标签')) {
         mapping.tag3 = table.table_id;
-      } else if (nameLower === '租户信息' || nameLower === '租户表') {
+      } else if (nameLower.includes('租户')) {
         mapping.tenants = table.table_id;
-      } else if (nameLower === '周期分析' || nameLower === '分析表') {
+      } else if (nameLower.includes('top问题') || nameLower.includes('top问题') || nameLower.includes('问题表')) {
+        mapping.top_issues = table.table_id;
+        mapping.analysis = table.table_id;
+      } else if (nameLower.includes('周期分析') || nameLower.includes('分析表')) {
         mapping.analysis = table.table_id;
       }
     }
@@ -274,10 +278,26 @@ export async function initializeBitableConfig(ownerId?: string, forceRefresh?: b
   }
 }
 
-/** 获取租户访问令牌 */
-async function getTenantAccessToken(): Promise<string> {
-  const appId = process.env.FEISHU_APP_ID;
-  const appSecret = process.env.FEISHU_APP_SECRET;
+/** 获取租户访问令牌
+ *  优先从 KV 存储读取飞书应用配置，其次从环境变量读取
+ */
+async function getTenantAccessToken(ownerId?: string): Promise<string> {
+  const resolvedOwnerId = ownerId || 'default_owner';
+  
+  // 尝试从 KV 存储读取配置
+  let appId = process.env.FEISHU_APP_ID;
+  let appSecret = process.env.FEISHU_APP_SECRET;
+  
+  try {
+    const { getFeishuAppConfig } = await import('./feishu-config');
+    const config = await getFeishuAppConfig(resolvedOwnerId);
+    if (config.appId && config.appSecret) {
+      appId = config.appId;
+      appSecret = config.appSecret;
+    }
+  } catch (e) {
+    console.warn('[Bitable] 从 KV 读取飞书配置失败，使用环境变量:', e);
+  }
   
   if (!appId || !appSecret) {
     throw new Error('飞书应用配置缺失');
@@ -510,6 +530,34 @@ export function extractFieldValue(value: unknown): string {
 }
 
 /**
+ * 解析飞书多维表格的日期时间字段值
+ * 支持两种格式：
+ * 1. 时间戳数字: 1719792000000
+ * 2. 日期字符串: "2024-07-01" 或 "2024/07/01"
+ * @returns Date 对象，解析失败返回 null
+ */
+export function parseBitableDate(value: unknown): Date | null {
+  if (value === null || value === undefined || value === '') return null;
+  // 数字时间戳（毫秒）
+  if (typeof value === 'number') {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  // 字符串
+  if (typeof value === 'string') {
+    // 纯数字字符串（时间戳）
+    if (/^\d+$/.test(value)) {
+      const d = new Date(Number(value));
+      return isNaN(d.getTime()) ? null : d;
+    }
+    // 日期字符串
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/**
  * 从飞书 MultiSelect 字段值中提取字符串数组
  * 支持两种格式：
  * 1. 字符串数组: ["tag1", "tag2"]
@@ -698,7 +746,7 @@ export async function searchRecordsFuzzy(
 // 表操作
 // ============================================
 
-function getFieldTypeNumber(type: string): number {
+export function getFieldTypeNumber(type: string): number {
   const typeMap: Record<string, number> = {
     Text: 1,
     Number: 2,
@@ -767,7 +815,11 @@ export async function createTable(
 
     const data = await response.json();
     if (data.code !== 0) {
-      throw new Error(`创建表失败: ${data.msg}`);
+      // 打印完整错误信息，方便排查字段验证问题
+      const errorDetail = JSON.stringify(data, null, 2);
+      console.error(`[Bitable] 创建表失败 [名称: ${name}]，完整错误响应:`, errorDetail);
+      console.error(`[Bitable] 失败时发送的字段定义:`, JSON.stringify(mappedFields, null, 2));
+      throw new Error(`创建表失败: ${data.msg}\n错误详情: ${errorDetail}`);
     }
 
     return data.data?.table_id || '';
@@ -940,4 +992,5 @@ export const bitableClient = {
   addMultiSelectOptions,
   extractFieldValue,
   extractMultiSelectFieldValue,
+  parseBitableDate,
 };

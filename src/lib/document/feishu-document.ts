@@ -170,12 +170,35 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
   ): Promise<void> {
     const accessToken = token || await this.getAccessToken();
     
-    // 将 Markdown 转换为飞书文档 Block
     const blocks = this.parseMarkdownToBlocks(content);
     
+    if (blocks.length === 0) {
+      console.warn('[文档] 没有可追加的内容');
+      return;
+    }
+
+    if (blocks.length > 50) {
+      console.warn(`[文档] Block数量(${blocks.length})超过API限制，将分批追加`);
+      for (let i = 0; i < blocks.length; i += 50) {
+        const batch = blocks.slice(i, i + 50);
+        await this.appendBlocksBatch(documentId, blockId, batch, position, accessToken);
+        position = 'bottom';
+      }
+      return;
+    }
+    
+    await this.appendBlocksBatch(documentId, blockId, blocks, position, accessToken);
+  }
+
+  private async appendBlocksBatch(
+    documentId: string,
+    blockId: string,
+    blocks: any[],
+    position: 'top' | 'bottom' = 'top',
+    accessToken: string
+  ): Promise<void> {
     const index = position === 'top' ? 0 : -1;
     
-    // 注意：飞书文档 API 端点是 /blocks/{block_id}/children
     const response = await fetch(
       `${DOCX_API_BASE}/documents/${documentId}/blocks/${blockId}/children`,
       {
@@ -194,6 +217,7 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
     
     const data = await response.json();
     if (data.code !== 0) {
+      console.error('[文档] API错误详情:', JSON.stringify(data));
       throw new Error(`追加内容失败: ${data.msg}`);
     }
   }
@@ -307,68 +331,120 @@ export class FeishuDocumentAdapter implements DocumentAdapter {
     const blocks: any[] = [];
     const lines = markdown.split('\n');
 
-    // 构建文本元素的辅助函数
-    const buildTextElements = (content: string) => [
-      {
-        text_run: {
-          content,
-        },
-      },
-    ];
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
 
-    for (const line of lines) {
       if (line.startsWith('### ')) {
-        // 三级标题
         blocks.push({
           block_type: 5,
           heading3: {
-            elements: buildTextElements(line.replace('### ', '')),
+            elements: this.buildTextElements(line.replace('### ', '')),
             style: {},
           },
         });
+        i++;
       } else if (line.startsWith('## ')) {
-        // 二级标题
         blocks.push({
           block_type: 4,
           heading2: {
-            elements: buildTextElements(line.replace('## ', '')),
+            elements: this.buildTextElements(line.replace('## ', '')),
             style: {},
           },
         });
+        i++;
       } else if (line.startsWith('# ')) {
-        // 一级标题
         blocks.push({
           block_type: 3,
           heading1: {
-            elements: buildTextElements(line.replace('# ', '')),
+            elements: this.buildTextElements(line.replace('# ', '')),
             style: {},
           },
         });
+        i++;
       } else if (line.startsWith('- ') || line.startsWith('* ')) {
-        // 无序列表
         const content = line.startsWith('- ')
           ? line.replace('- ', '')
           : line.replace('* ', '');
         blocks.push({
           block_type: 12,
           bullet: {
-            elements: buildTextElements(content),
+            elements: this.buildTextElements(content),
             style: {},
           },
         });
+        i++;
       } else if (line.trim() === '---') {
-        // 分割线
         blocks.push({ block_type: 22, divider: {} });
+        i++;
+      } else if (line.startsWith('|')) {
+        const tableRows: string[] = [];
+        while (i < lines.length && lines[i].startsWith('|')) {
+          tableRows.push(lines[i]);
+          i++;
+        }
+        const tableBlocks = this.parseTableBlock(tableRows);
+        if (tableBlocks) {
+          blocks.push(...tableBlocks);
+        }
       } else if (line.trim()) {
-        // 普通文本
         blocks.push({
           block_type: 2,
           text: {
-            elements: buildTextElements(line),
+            elements: this.buildTextElements(line),
             style: {},
           },
         });
+        i++;
+      } else {
+        i++;
       }
+    }
+
+    return blocks;
+  }
+
+  private buildTextElements(content: string): any[] {
+    const cleanContent = content
+      .replace(/[^\u0000-\uFFFF]/g, '')
+      .replace(/[⚠️⚠]/g, '[警告]')
+      .substring(0, 3000);
+    return [
+      {
+        text_run: {
+          content: cleanContent,
+        },
+      },
+    ];
+  }
+
+  private parseTableBlock(tableRows: string[]): any[] | null {
+    if (tableRows.length < 2) return null;
+
+    const headerRow = tableRows[0];
+    const dataRows = tableRows.slice(2);
+
+    const headers = headerRow.split('|').filter(h => h.trim()).map(h => h.trim());
+
+    const blocks: any[] = [];
+
+    blocks.push({
+      block_type: 2,
+      text: {
+        elements: this.buildTextElements('【' + headers.join(' | ') + '】'),
+        style: {},
+      },
+    });
+
+    for (const row of dataRows) {
+      const cells = row.split('|').filter(c => c.trim()).map(c => c.trim());
+      blocks.push({
+        block_type: 2,
+        text: {
+          elements: this.buildTextElements('  ' + cells.join(' | ')),
+          style: {},
+        },
+      });
     }
 
     return blocks;

@@ -184,11 +184,12 @@ export class LocalUserResourceStore implements UserResourceStore {
 
   /**
    * 判断资源是否已初始化
-   * 必须有实际的云资源（根文件夹或多维表格）才算已初始化
+   * 必须有根文件夹才算已初始化
+   * 多维表格单独配置，不影响云资源初始化状态
    */
   async exists(): Promise<boolean> {
     const resource = await this.get();
-    return resource !== null && !!(resource.rootFolderToken || resource.bitableBaseToken);
+    return resource !== null && !!resource.rootFolderToken;
   }
 
   /**
@@ -302,11 +303,12 @@ export class KvUserResourceStore implements UserResourceStore {
 
   /**
    * 判断资源是否已初始化
-   * 必须有实际的云资源（根文件夹或多维表格）才算已初始化
+   * 必须有根文件夹才算已初始化
+   * 多维表格单独配置，不影响云资源初始化状态
    */
   async exists(): Promise<boolean> {
     const resource = await this.get();
-    return resource !== null && !!(resource.rootFolderToken || resource.bitableBaseToken);
+    return resource !== null && !!resource.rootFolderToken;
   }
 
   /**

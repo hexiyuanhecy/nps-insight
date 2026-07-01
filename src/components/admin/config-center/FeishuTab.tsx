@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, Bell, FolderOpen, Link, LogOut, Plus, Sparkles, TestTube, User } from 'lucide-react';
+import { BarChart3, Bell, Bug, FolderOpen, Link, LogOut, Plus, Sparkles, TestTube, User } from 'lucide-react';
 import type { ConfigCenterController } from '@/components/admin/config-center/use-config-center';
 import {
   AutoSaveField,
@@ -25,7 +25,9 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
   const [userResource, setUserResource] = useState<UserResource | null>(null);
   const [resourceExists, setResourceExists] = useState(false);
   const [loadingResource, setLoadingResource] = useState(true);
-  const { authState, loadAuthStatus, doAuth } = useFeishuAuth({
+  const [debugLogOpen, setDebugLogOpen] = useState(false);
+  const [linkAppToken, setLinkAppToken] = useState(''); // 绑定表格的输入框，不自动保存
+  const { authState, loadAuthStatus, doAuth, debugLogs } = useFeishuAuth({
     autoSilentAuth: true,
     onSuccess: () => {
       if (ctrl.refreshUserResource) {
@@ -50,7 +52,10 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
   const handleInitResource = async () => {
     const adminUserIds = config?.notification.adminUserIds || '';
     const firstUserId = adminUserIds.split(',')[0]?.trim() || '';
-    const result = await ctrl.initializeUserResource('feishu', firstUserId);
+    // 优先使用已授权的用户信息，兜底用管理员配置
+    const userName = authState.userInfo?.name || userResource?.userName || '';
+    const userOpenId = authState.userInfo?.open_id || userResource?.userOpenId || firstUserId;
+    const result = await ctrl.initializeUserResource('feishu', userName, userOpenId);
     if (result) {
       setResourceExists(true);
       setUserResource(result.resource || null);
@@ -209,13 +214,66 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
         )}
       </section>
 
+      {/* 授权调试日志 */}
+      <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <CollapsiblePanel
+          open={debugLogOpen}
+          onToggle={() => setDebugLogOpen(!debugLogOpen)}
+          icon={<Bug className="h-4 w-4" />}
+          title="授权调试日志"
+          subtitle={`共 ${debugLogs.length} 条日志，用于排查飞书授权问题`}
+        >
+          <div className="mt-3 max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-slate-900 p-3 font-mono text-xs">
+            {debugLogs.length === 0 ? (
+              <p className="text-slate-500">暂无日志...</p>
+            ) : (
+              <div className="space-y-1">
+                {debugLogs.map((log) => (
+                  <div key={log.id} className="flex gap-2">
+                    <span className="shrink-0 text-slate-500">{log.timestamp}</span>
+                    <span
+                      className={`shrink-0 font-bold ${
+                        log.level === 'error'
+                          ? 'text-red-400'
+                          : log.level === 'warn'
+                          ? 'text-yellow-400'
+                          : 'text-green-400'
+                      }`}
+                    >
+                      [{log.level.toUpperCase()}]
+                    </span>
+                    <span className="text-slate-200">{log.message}</span>
+                    {log.data && (
+                      <span className="text-slate-400 break-all">— {log.data}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="mt-2 flex items-center justify-between">
+            <p className="text-xs text-slate-500">
+              💡 日志每秒自动刷新。在飞书内打开页面时，可通过此面板查看授权流程的详细步骤。
+            </p>
+            <button
+              onClick={() => {
+                window.location.reload();
+              }}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              重新加载页面
+            </button>
+          </div>
+        </CollapsiblePanel>
+      </section>
+
       {/* 用户云资源管理 */}
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <div className="mb-4 flex items-start justify-between">
           <div>
             <h3 className="text-base font-semibold text-slate-900">用户云资源管理</h3>
             <p className="mt-1 text-xs text-slate-500">
-              首次使用自动创建专属云文件夹、多维表格，所有文件统一管理
+              创建用户专属云文件夹结构，用于存放周报、月报等业务文档。多维表格请在下方单独配置。
             </p>
           </div>
           <StatusBadge 
@@ -228,9 +286,9 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
             <p className="text-sm text-slate-500">正在加载资源状态...</p>
           </div>
-        ) : resourceExists && userResource && (userResource.rootFolderToken || userResource.bitableBaseToken) ? (
+        ) : resourceExists && userResource && userResource.rootFolderToken ? (
           <div className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-3">
                 <p className="text-xs font-medium text-slate-500">根文件夹</p>
                 <a 
@@ -243,30 +301,6 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
                   打开根文件夹
                 </a>
                 <p className="mt-1 font-mono text-xs text-slate-500 truncate">{userResource.rootFolderToken}</p>
-              </div>
-              <div className="rounded-lg border border-green-100 bg-green-50/50 p-3">
-                <p className="text-xs font-medium text-slate-500">多维表格</p>
-                <div className="mt-1 flex flex-col gap-1">
-                  <a 
-                    href={`https://www.feishu.cn/base/${userResource.bitableBaseToken}`} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-sm text-green-600 hover:underline"
-                  >
-                    <BarChart3 className="h-3.5 w-3.5" />
-                    打开多维表格
-                  </a>
-                  <a 
-                    href={`https://www.feishu.cn/drive/folder/${userResource.rootFolderToken}`} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-sm text-blue-600 hover:underline"
-                  >
-                    <FolderOpen className="h-3.5 w-3.5" />
-                    打开云文档
-                  </a>
-                </div>
-                <p className="mt-1 font-mono text-xs text-slate-500 truncate">{userResource.bitableBaseToken}</p>
               </div>
               <div className="rounded-lg border border-purple-100 bg-purple-50/50 p-3">
                 <p className="text-xs font-medium text-slate-500">周报归档</p>
@@ -295,17 +329,18 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
                 <p className="mt-1 font-mono text-xs text-slate-500 truncate">{userResource.monthFolderToken}</p>
               </div>
             </div>
-            <div className="mt-2 rounded-md bg-slate-50 px-3 py-2">
-              <p className="text-xs text-slate-500">
-                <span className="font-medium text-slate-700">本地环境提示：</span>
-                以上 Token 仅存在于当前进程内存，重启后失效。请将 Token 手动写入 .env.local 持久化。
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-600">
+                <span className="font-medium text-slate-700">💡 多维表格配置：</span>
+                请前往下方「飞书多维表格绑定/新建」区域创建或绑定多维表格，用于存储业务数据。
               </p>
             </div>
           </div>
         ) : (
           <div className="space-y-3">
             <InfoBox type="warn">
-              尚未初始化用户云资源。点击下方按钮，一键创建专属文件夹、多维表格等全套资源。
+              尚未初始化用户云资源。点击下方按钮，一键创建根文件夹、周报归档、月报汇总三个文件夹。
+              多维表格请在初始化完成后，前往下方单独配置。
             </InfoBox>
             <div className="flex gap-3">
               <PrimaryButton 
@@ -425,24 +460,33 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
           <CollapsiblePanel
             open={ctrl.bitableLinkOpen}
             onToggle={() => {
-              ctrl.setBitableLinkOpen(!ctrl.bitableLinkOpen);
-              if (!ctrl.bitableLinkOpen) ctrl.setBitableCreateOpen(false);
+              const willOpen = !ctrl.bitableLinkOpen;
+              ctrl.setBitableLinkOpen(willOpen);
+              if (willOpen) ctrl.setBitableCreateOpen(false);
+              // 展开时，把当前已保存的 token 放到输入框里
+              if (willOpen && config?.bitable.appToken) {
+                setLinkAppToken(config.bitable.appToken);
+              }
             }}
             icon={<Link className="h-4 w-4" />}
             title="绑定已有表格"
             subtitle="把已存在的多维表格通过 App Token 绑定"
           >
-            <AutoSaveField fieldPath="bitable.appToken" value={config.bitable.appToken} onSave={ctrl.savePartial}>
-              <TextField
-                label="App Token"
-                value={config.bitable.appToken}
-                onChange={(v) => ctrl.updateBitable('appToken', v)}
-                placeholder="bascnxxxxxxxxxxxxxxxx"
-                hint="从表格 URL /base/ 之后的字符串"
-              />
-            </AutoSaveField>
+            <TextField
+              label="App Token"
+              value={linkAppToken}
+              onChange={(v) => setLinkAppToken(v)}
+              placeholder="bascnxxxxxxxxxxxxxxxx"
+              hint="从表格 URL /base/ 之后的字符串，校验通过后才会保存"
+            />
             <div className="mt-3">
-              <PrimaryButton onClick={() => ctrl.linkTable('feishu')} loading={ctrl.tabLoading.feishu} icon={<Link className="h-4 w-4" />}>校验并绑定</PrimaryButton>
+              <PrimaryButton
+                onClick={() => ctrl.linkTable('feishu', linkAppToken)}
+                loading={ctrl.tabLoading.feishu}
+                icon={<Link className="h-4 w-4" />}
+              >
+                校验并绑定
+              </PrimaryButton>
             </div>
           </CollapsiblePanel>
         </div>

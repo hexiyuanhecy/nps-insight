@@ -7,7 +7,7 @@
  */
 
 import { AdapterFactory } from '@/lib/data-sources/adapter-factory';
-import { bitableClient, initializeBitableConfig } from '@/lib/feishu/bitable';
+import { bitableClient, initializeBitableConfig, parseBitableDate } from '@/lib/feishu/bitable';
 import { extractMultiSelectFieldValue } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, TENANT_FIELDS } from '@/lib/feishu/constants';
 import { feishuBot, createWeeklyReportCard, sendErrorNotify } from '@/lib/feishu/bot';
@@ -456,8 +456,8 @@ async function generateDailyReport(): Promise<boolean> {
     });
 
     const yesterdayFeedbacks = records.filter((r) => {
-      const createTime = new Date(String(r.fields[FEEDBACK_FIELDS.CREATE_TIME] || ''));
-      return createTime >= yesterday && createTime < today;
+      const createTime = parseBitableDate(r.fields[FEEDBACK_FIELDS.CREATE_TIME]);
+      return createTime && createTime >= yesterday && createTime < today;
     });
 
     if (yesterdayFeedbacks.length === 0) {
@@ -521,8 +521,8 @@ async function sendNotification(syncedCount: number): Promise<boolean> {
 
     for (const r of records) {
       const fields = r.fields || {};
-      const createTime = new Date(String(fields[FEEDBACK_FIELDS.CREATE_TIME] || ''));
-      if (createTime < weekStart || createTime >= weekEnd) continue;
+      const createTime = parseBitableDate(fields[FEEDBACK_FIELDS.CREATE_TIME]);
+      if (!createTime || createTime < weekStart || createTime >= weekEnd) continue;
 
       // 待审核字段可能是布尔值 true/false 或字符串 '是'/'否'
       const reviewNeededVal = fields[FEEDBACK_FIELDS.REVIEW_NEEDED];
@@ -602,7 +602,8 @@ async function sendNotification(syncedCount: number): Promise<boolean> {
         reviewCount,
         topIssues,
         scoreDistribution,
-        bitableUrl: process.env.FEISHU_BITABLE_URL || '',
+        bitableUrl: process.env.FEISHU_BITABLE_URL || process.env.BITABLE_URL || '',
+        feedbackTableId: process.env.BITABLE_FEEDBACK_TABLE_ID || '',
         logPlatformUrl: process.env.LOG_PLATFORM_URL_TEMPLATE || process.env.LOG_PLATFORM_URL || '',
         hasNeedLogCheck: needLogCheckCount > 0,
         hasReviewNeeded: reviewCount > 0

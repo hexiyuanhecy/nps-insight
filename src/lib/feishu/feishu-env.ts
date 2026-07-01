@@ -21,11 +21,32 @@ export function isInFeishuMiniApp(): boolean {
 /**
  * 通过 User-Agent 判断是否在飞书客户端内
  * 这是最可靠的初筛方式，不受 JSAPI 注入时机影响
+ * 
+ * 飞书客户端 UA 特征（已验证）：
+ * - 移动端飞书：包含 "Lark" 或 "Feishu"
+ * - PC 端飞书：包含 "Lark" 或 "Feishu"
+ * - 企业微信：包含 "wxwork" 或 "MicroMessenger"
+ * - 部分版本可能包含 "Bytedance" 或 "bytedance"
  */
 export function isFeishuClientByUA(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent.toLowerCase();
-  return ua.includes('feishu') || ua.includes('larksuite');
+  // 检测多种飞书相关标识
+  return ua.includes('feishu') || 
+         ua.includes('lark') || 
+         ua.includes('larksuite') ||
+         ua.includes('bytedance') ||
+         ua.includes('byte-dance') ||
+         ua.includes('wxwork') ||
+         ua.includes('micromessenger');
+}
+
+/**
+ * 获取当前 User-Agent 字符串（用于调试）
+ */
+export function getUserAgent(): string {
+  if (typeof navigator === 'undefined') return '';
+  return navigator.userAgent;
 }
 
 /**

@@ -5,6 +5,7 @@
 
 import { getFeishuClient } from './client';
 import { DEFAULT_TOP_N } from '@/constants/app-constants';
+import { FEEDBACK_FIELDS } from './constants';
 
 /** 生成 UUID v4 */
 function generateUUID(): string {
@@ -940,6 +941,7 @@ export function createWeeklyReportCard(data: {
   }>
   scoreDistribution: Array<{ score: string; pct: number }>
   bitableUrl?: string
+  feedbackTableId?: string
   logPlatformUrl?: string
   hasNeedLogCheck: boolean
   hasReviewNeeded: boolean
@@ -953,11 +955,18 @@ export function createWeeklyReportCard(data: {
     topIssues,
     scoreDistribution,
     bitableUrl,
-    logPlatformUrl,
+    feedbackTableId,
+    logPlatformUrl: rawLogPlatformUrl,
     hasNeedLogCheck,
     hasReviewNeeded
   } = data
   const reviewWarning = reviewCount > 100
+
+  // 处理日志平台URL：相对路径转绝对路径（飞书卡片必须用完整URL）
+  const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || 'http://localhost:3000'
+  const logPlatformUrl = rawLogPlatformUrl && rawLogPlatformUrl.startsWith('/')
+    ? `${appBaseUrl}${rawLogPlatformUrl}`
+    : rawLogPlatformUrl || ''
 
   const elements: Record<string, unknown>[] = [
     {
@@ -993,18 +1002,34 @@ export function createWeeklyReportCard(data: {
 
   // 按钮
   const actions: Record<string, unknown>[] = []
-  if (hasReviewNeeded)
+  // 构建多维表格基础URL（带上数据表ID，确保跳转到反馈表）
+  const baseUrl = bitableUrl || ''
+  const tableParam = feedbackTableId ? `table=${feedbackTableId}` : ''
+
+  // 构建审核标签筛选URL：跳转到反馈表，筛选"待审核"字段为"是"的记录
+  if (hasReviewNeeded) {
+    const reviewFilter = encodeURIComponent(JSON.stringify({
+      conditions: [
+        {
+          field_name: FEEDBACK_FIELDS.REVIEW_NEEDED,
+          operator: 'is',
+          value: ['是']
+        }
+      ]
+    }))
+    const queryParams = [tableParam, `filter=${reviewFilter}`].filter(Boolean).join('&')
     actions.push({
       tag: 'button',
       text: { tag: 'plain_text', content: '审核标签' },
       type: 'primary',
-      url: `${bitableUrl || ''}?filter=%7B%22conditions%22%3A%5B%7B%22field_name%22%3A%22%E9%9C%80%E8%A6%81%E4%BA%BA%E5%B7%A5%E5%AE%A1%E6%A0%B8%22%2C%22operator%22%3A%22is%22%2C%22value%22%3A%5Btrue%5D%7D%5D%7D`
+      url: queryParams ? `${baseUrl}?${queryParams}` : baseUrl
     })
+  }
   actions.push({
     tag: 'button',
     text: { tag: 'plain_text', content: '完整看板' },
     type: 'default',
-    url: bitableUrl
+    url: baseUrl
   })
   if (hasNeedLogCheck && logPlatformUrl)
     actions.push({

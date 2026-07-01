@@ -113,6 +113,21 @@ export async function generateWeeklyReport(weekOffset: number = 0): Promise<{
           userAccessToken = newToken.access_token;
           tokenExpiresAt = getCurrentTimestampSeconds() + newToken.expires_in;
           console.log('[周报] Token刷新成功');
+          
+          // 保存新token到存储，供下次使用
+          try {
+            if (userResourceStore.save) {
+              await userResourceStore.save({
+                ...(userResource || {} as any),
+                userAccessToken: newToken.access_token,
+                refreshToken: newToken.refresh_token || userRefreshToken,
+                tokenExpiresAt: getCurrentTimestampSeconds() + newToken.expires_in,
+              });
+              console.log('[周报] 新Token已保存到存储');
+            }
+          } catch (saveErr) {
+            console.warn('[周报] 保存Token失败:', saveErr instanceof Error ? saveErr.message : '未知错误');
+          }
         }
       } catch (refreshErr) {
         console.error('[周报] Token刷新失败:', refreshErr);

@@ -81,6 +81,24 @@ export interface AuthStatus {
 }
 
 /**
+ * 从环境变量 + KV 存储获取飞书应用配置
+ * 优先级：KV 存储 > 环境变量
+ */
+async function getAppConfigFromKV(ownerId?: string): Promise<FeishuAppConfig | null> {
+  try {
+    const { getFeishuAppConfig } = await import('./feishu-config');
+    const config = await getFeishuAppConfig(ownerId);
+    if (config.appId && config.appSecret) {
+      return config;
+    }
+    return null;
+  } catch (e) {
+    console.warn('[UserAuth] 从 KV 读取飞书配置失败:', e);
+    return null;
+  }
+}
+
+/**
  * 从环境变量获取飞书应用配置（兼容旧代码）
  */
 function getAppConfigFromEnv(): FeishuAppConfig {
@@ -93,12 +111,20 @@ function getAppConfigFromEnv(): FeishuAppConfig {
 }
 
 /**
- * 解析飞书应用配置：优先使用传入的配置，否则从环境变量读取
+ * 解析飞书应用配置
+ * 优先级：传入配置 > KV 存储 > 环境变量
  */
-function resolveAppConfig(appConfig?: FeishuAppConfig): FeishuAppConfig {
+async function resolveAppConfig(appConfig?: FeishuAppConfig, ownerId?: string): Promise<FeishuAppConfig> {
+  // 1. 优先使用传入的配置
   if (appConfig?.appId && appConfig?.appSecret) {
     return appConfig;
   }
+  // 2. 其次从 KV 存储读取
+  const kvConfig = await getAppConfigFromKV(ownerId);
+  if (kvConfig && kvConfig.appId && kvConfig.appSecret) {
+    return kvConfig;
+  }
+  // 3. 最后从环境变量读取
   return getAppConfigFromEnv();
 }
 
@@ -116,10 +142,16 @@ async function resolveTenantToken(appConfig?: FeishuAppConfig): Promise<string> 
  * 生成飞书 OAuth 授权 URL
  * @param redirectUri 授权回调地址
  * @param state 状态参数，用于防止 CSRF
- * @param appConfig 飞书应用配置（可选，不传则从环境变量读取）
+ * @param appConfig 飞书应用配置（可选，不传则从 KV/环境变量读取）
+ * @param ownerId 用户ID（可选，用于从 KV 读取配置）
  */
-export function getAuthorizationUrl(redirectUri: string, state?: string, appConfig?: FeishuAppConfig): string {
-  const config = resolveAppConfig(appConfig);
+export async function getAuthorizationUrl(
+  redirectUri: string,
+  state?: string,
+  appConfig?: FeishuAppConfig,
+  ownerId?: string
+): Promise<string> {
+  const config = await resolveAppConfig(appConfig, ownerId);
   const clientId = config.appId;
   
   // 生成随机 state
@@ -367,7 +399,7 @@ function sha1(message: string): string {
  * @param appConfig 飞书应用配置
  */
 export async function generateJsapiConfig(url: string, appConfig?: FeishuAppConfig): Promise<JsapiConfig> {
-  const config = resolveAppConfig(appConfig);
+  const config = await resolveAppConfig(appConfig);
   const ticket = await getJsapiTicket(config);
 
   const timestamp = getCurrentTimestampSeconds();

@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { isFeishuClientByUA } from '@/lib/feishu/feishu-env';
 
 /**
  * 授权回调页面
- * 用于浏览器环境下新窗口授权完成后的结果展示
- * - 显示授权成功/失败状态
- * - 通过 postMessage 通知原窗口
- * - 自动关闭窗口
+ * 两种场景：
+ * 1. 飞书环境：当前页面跳转授权，授权成功后跳回管理页
+ * 2. 浏览器环境：新窗口打开授权，授权成功后 postMessage 通知原窗口并自动关闭
  */
 export default function AuthCallbackPage() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -16,13 +16,41 @@ export default function AuthCallbackPage() {
   const [countdown, setCountdown] = useState(3);
 
   useEffect(() => {
-    // 从 URL 参数中获取授权结果
     const params = new URLSearchParams(window.location.search);
     const success = params.get('success');
     const errorMsg = params.get('error');
     const userName = params.get('user_name');
 
-    // 通知原窗口授权结果
+    const inFeishu = isFeishuClientByUA();
+
+    // 飞书环境：授权成功后跳回管理页，带上 auth_success 参数让管理页刷新状态
+    if (inFeishu && success === '1') {
+      console.log('[AuthCallback] 飞书环境，授权成功，跳回管理页');
+      const adminUrl = new URL('/admin', window.location.origin);
+      adminUrl.searchParams.set('auth_success', '1');
+      if (userName) {
+        adminUrl.searchParams.set('user_name', userName);
+      }
+      setTimeout(() => {
+        window.location.href = adminUrl.toString();
+      }, 300);
+      return;
+    }
+
+    // 飞书环境：授权失败也跳回管理页，带错误参数
+    if (inFeishu && success !== '1') {
+      console.log('[AuthCallback] 飞书环境，授权失败，跳回管理页');
+      const adminUrl = new URL('/admin', window.location.origin);
+      if (errorMsg) {
+        adminUrl.searchParams.set('auth_error', errorMsg);
+      }
+      setTimeout(() => {
+        window.location.href = adminUrl.toString();
+      }, 500);
+      return;
+    }
+
+    // 浏览器环境：新窗口场景，通知原窗口 + 显示结果 + 自动关闭
     const sendMessageToParent = () => {
       if (window.opener) {
         try {

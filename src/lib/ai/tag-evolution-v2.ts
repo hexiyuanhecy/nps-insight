@@ -23,6 +23,9 @@ export interface TagEvolutionResultV2 {
   mergeTag2Count: number;
   manualReviewItems: string[];
   error?: string;
+  mergeTag3Details?: Array<{ tagNames: string[]; retainTagName: string; reason: string }>;
+  splitTag3Details?: Array<{ originTag2Name: string; newTag2Name: string; tag3Names: string[] }>;
+  mergeTag2Details?: Array<{ tagNames: string[]; retainTagName: string; reason: string }>;
 }
 
 interface MergeGroup {
@@ -482,6 +485,9 @@ export async function runTagEvolutionV2(): Promise<TagEvolutionResultV2> {
     newTag2Count: 0,
     mergeTag2Count: 0,
     manualReviewItems: [],
+    mergeTag3Details: [],
+    splitTag3Details: [],
+    mergeTag2Details: [],
   };
   const manualSet = new Set<string>();
 
@@ -514,25 +520,52 @@ export async function runTagEvolutionV2(): Promise<TagEvolutionResultV2> {
     }
     aiResult.manual_review.forEach(m => manualSet.add(m));
 
-    // 4. 执行 Tag3 合并
+    // 4. 收集详细的合并/拆分信息（执行前）
+    const tag3ById = new Map(tag3List.map(t => [t.tagId, t.name]));
+    const tag2ById = new Map(tag2List.map(t => [t.tagId, t.name]));
+
+    // Tag3 合并详情
+    for (const group of aiResult.tag3_opt_result.merge_tag3) {
+      const tagNames = group.merge_group.map(id => tag3ById.get(id) || id);
+      const retainTagName = tag3ById.get(group.retain_tag_id) || group.retain_tag_id;
+      result.mergeTag3Details!.push({ tagNames, retainTagName, reason: group.reason });
+    }
+
+    // Tag3 拆分详情
+    for (const item of aiResult.tag3_opt_result.split_tag3_to_new_tag2) {
+      const originTag2Name = tag2ById.get(item.origin_tag2_id) || item.origin_tag2_id;
+      for (const newTag2 of item.new_tag2_list) {
+        const tag3Names = newTag2.bind_tag3_ids.map(id => tag3ById.get(id) || id);
+        result.splitTag3Details!.push({ originTag2Name, newTag2Name: newTag2.new_tag2_name, tag3Names });
+      }
+    }
+
+    // Tag2 合并详情
+    for (const group of aiResult.tag2_opt_result.merge_tag2) {
+      const tagNames = group.merge_group.map(id => tag2ById.get(id) || id);
+      const retainTagName = tag2ById.get(group.retain_tag_id) || group.retain_tag_id;
+      result.mergeTag2Details!.push({ tagNames, retainTagName, reason: group.reason });
+    }
+
+    // 5. 执行 Tag3 合并
     const m3 = await executeTag3Merges(aiResult.tag3_opt_result.merge_tag3, tag3List, feedbacks);
     result.mergeTag3Count = m3.successCount;
     m3.failedItems.forEach(m => manualSet.add(m));
     if (m3.failedItems.length > 0) result.success = false;
 
-    // 5. 执行 Tag3 拆分
+    // 6. 执行 Tag3 拆分
     const s3 = await executeTag3Splits(aiResult.tag3_opt_result.split_tag3_to_new_tag2, tag2List, tag3List, feedbacks);
     result.newTag2Count = s3.newTag2Ids.length;
     s3.failedItems.forEach(m => manualSet.add(m));
     if (s3.failedItems.length > 0) result.success = false;
 
-    // 6. 执行 Tag2 合并
+    // 7. 执行 Tag2 合并
     const m2 = await executeTag2Merges(aiResult.tag2_opt_result.merge_tag2, tag2List, feedbacks);
     result.mergeTag2Count = m2.successCount;
     m2.failedItems.forEach(m => manualSet.add(m));
     if (m2.failedItems.length > 0) result.success = false;
 
-    // 7. 缓存失效
+    // 8. 缓存失效
     try { invalidateTagCache(); } catch (_) { /* 清缓存失败不影响主流程 */ }
 
     result.manualReviewItems = Array.from(manualSet);

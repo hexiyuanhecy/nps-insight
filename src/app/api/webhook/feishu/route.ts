@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FeishuWebhookEvent, BotCommand } from '@/lib/types';
 import { feishuBot, createHelpCard, createAnalysisCard, createFeedbackCard, createOnboardingCard } from '@/lib/feishu/bot';
-import { bitableClient, extractMultiSelectFieldValue } from '@/lib/feishu/bitable';
+import { bitableClient, extractMultiSelectFieldValue, parseBitableDate } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, ANALYSIS_FIELDS } from '@/lib/feishu/constants';
 import { handleQuestion } from '@/lib/ai/chatbot';
 import { DEFAULT_PAGE_SIZE } from '@/constants/app-constants';
@@ -267,8 +267,8 @@ async function handleReport(cmd: BotCommand): Promise<void> {
     });
 
     const recentFeedbacks = records.filter((r) => {
-      const createTime = new Date(String(r.fields[FEEDBACK_FIELDS.CREATE_TIME] || ''));
-      return createTime >= thirtyDaysAgo;
+      const createTime = parseBitableDate(r.fields[FEEDBACK_FIELDS.CREATE_TIME]);
+      return createTime && createTime >= thirtyDaysAgo;
     });
 
     const total = recentFeedbacks.length;

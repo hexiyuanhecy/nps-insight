@@ -16,10 +16,33 @@ import { DEFAULT_PAGE_SIZE } from '@/constants/app-constants';
 export interface TopIssue {
   index: string;
   tag2: string;
+  /** 所属模块（Tag1 名称） */
+  module: string;
+  /** 该 Tag2 下最高频的 Tag3 名称 */
+  tag3: string;
+  /** 总反馈数 */
+  totalCount: number;
+  /** 大租户占比（0-1） */
+  largeTenantRatio: number;
+  /** 平均 NPS 评分 */
+  avgScore: number;
+  /** A4 租户反馈数 */
+  a4Count: number;
+  /** A5 租户反馈数 */
+  a5Count: number;
+  /** A6 租户反馈数 */
+  a6Count: number;
+  /** 大租户反馈数（A4+A5+A6） */
+  largeTenantCount: number;
+  /** 人工排序 */
   manualPriority: number;
+  /** 负责人 */
   owner: string;
+  /** 解决方案 */
   resolution: string;
+  /** 状态 */
   status: string;
+  /** 迭代周期 */
   iterationPeriod: string;
 }
 
@@ -46,6 +69,10 @@ interface TagMappings {
  */
 interface IssueGroup {
   tag2: string;
+  /** Tag3 出现次数统计，用于找最高频 Tag3 */
+  tag3Counts: Map<string, number>;
+  /** Tag1 出现次数统计，用于确定所属模块 */
+  tag1Counts: Map<string, number>;
   totalCount: number;
   a4Count: number;
   a5Count: number;
@@ -113,7 +140,8 @@ export class TopIssuesGenerator {
 
   /**
    * 写入 Top 问题表
-   * 新建时写入所有字段，更新时只更新非统计字段（统计字段由公式/自动计算）
+   * PRD-FLOW-015: 已存在问题只更新"本期新增数"，绝不覆盖人工字段（负责人/解决方案/迭代周期）
+   * 新问题新增一行，写入所有字段
    */
   async writeToTable(issues: TopIssue[]): Promise<void> {
     console.log('[Top问题] 写入 Top 问题表');
@@ -122,15 +150,22 @@ export class TopIssuesGenerator {
       pageSize: DEFAULT_PAGE_SIZE,
     });
 
+    // 按所属模块+tag2 建立已有记录映射（兼容单选字段返回数组或文本）
     const existingMap = new Map<string, BitableRecord>();
     for (const issue of existingIssues) {
-      const key = String(issue.fields[TOP_ISSUES_FIELDS.TAG2] || '');
+      const tag2Val = issue.fields[TOP_ISSUES_FIELDS.TAG2];
+      let key = '';
+      if (Array.isArray(tag2Val) && tag2Val.length > 0) {
+        key = String(tag2Val[0]);
+      } else {
+        key = String(tag2Val || '');
+      }
       if (key) {
         existingMap.set(key, issue);
       }
     }
 
-    // 过滤掉"其他"分类（不是具体问题分类，且多选字段可能无此选项）
+    // 过滤掉"其他"分类
     const validIssues = issues.filter((issue) => issue.tag2 !== '其他');
     if (validIssues.length < issues.length) {
       console.log(`[Top问题] 过滤掉 ${issues.length - validIssues.length} 条"其他"分类问题`);
@@ -141,14 +176,33 @@ export class TopIssuesGenerator {
 
     for (const issue of validIssues) {
       const existing = existingMap.get(issue.tag2);
-      const issueAny = issue as any;
 
       if (existing) {
-        // 更新：只更新手动维护的字段，统计字段由公式/自动计算
+        // 更新：只更新排名和统计字段，绝不覆盖人工字段
         recordsToUpdate.push({
           record_id: existing.record_id,
           fields: {
             [TOP_ISSUES_FIELDS.INDEX]: issue.index,
+            [TOP_ISSUES_FIELDS.TOTAL_COUNT]: issue.totalCount,
+            [TOP_ISSUES_FIELDS.A4_COUNT]: issue.a4Count,
+            [TOP_ISSUES_FIELDS.A5_COUNT]: issue.a5Count,
+            [TOP_ISSUES_FIELDS.A6_COUNT]: issue.a6Count,
+            [TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT]: issue.largeTenantCount,
+          },
+        });
+      } else {
+        // 新建：写入所有字段
+        recordsToCreate.push({
+          fields: {
+            [TOP_ISSUES_FIELDS.INDEX]: issue.index,
+            [TOP_ISSUES_FIELDS.MODULE]: issue.module,
+            [TOP_ISSUES_FIELDS.TAG2]: [issue.tag2],
+            [TOP_ISSUES_FIELDS.TAG3]: issue.tag3 || '',
+            [TOP_ISSUES_FIELDS.TOTAL_COUNT]: issue.totalCount,
+            [TOP_ISSUES_FIELDS.A4_COUNT]: issue.a4Count,
+            [TOP_ISSUES_FIELDS.A5_COUNT]: issue.a5Count,
+            [TOP_ISSUES_FIELDS.A6_COUNT]: issue.a6Count,
+            [TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT]: issue.largeTenantCount,
             [TOP_ISSUES_FIELDS.MANUAL_PRIORITY]: issue.manualPriority,
             [TOP_ISSUES_FIELDS.OWNER]: issue.owner,
             [TOP_ISSUES_FIELDS.RESOLUTION]: issue.resolution,
@@ -156,36 +210,6 @@ export class TopIssuesGenerator {
             [TOP_ISSUES_FIELDS.ITERATION_PERIOD]: issue.iterationPeriod,
           },
         });
-      } else {
-        // 新建：写入所有字段
-        const fields: Record<string, unknown> = {
-          [TOP_ISSUES_FIELDS.INDEX]: issue.index,
-          [TOP_ISSUES_FIELDS.TAG2]: [issue.tag2],
-          [TOP_ISSUES_FIELDS.MANUAL_PRIORITY]: issue.manualPriority,
-          [TOP_ISSUES_FIELDS.OWNER]: issue.owner,
-          [TOP_ISSUES_FIELDS.RESOLUTION]: issue.resolution,
-          [TOP_ISSUES_FIELDS.STATUS]: issue.status,
-          [TOP_ISSUES_FIELDS.ITERATION_PERIOD]: issue.iterationPeriod,
-        };
-        
-        // 如果有统计数据也一并写入（如果表格支持的话）
-        if (issueAny.totalCount !== undefined) {
-          fields[TOP_ISSUES_FIELDS.TOTAL_COUNT] = issueAny.totalCount;
-        }
-        if (issueAny.a4Count !== undefined) {
-          fields[TOP_ISSUES_FIELDS.A4_COUNT] = issueAny.a4Count;
-        }
-        if (issueAny.a5Count !== undefined) {
-          fields[TOP_ISSUES_FIELDS.A5_COUNT] = issueAny.a5Count;
-        }
-        if (issueAny.a6Count !== undefined) {
-          fields[TOP_ISSUES_FIELDS.A6_COUNT] = issueAny.a6Count;
-        }
-        if (issueAny.largeTenantCount !== undefined) {
-          fields[TOP_ISSUES_FIELDS.LARGE_TENANT_COUNT] = issueAny.largeTenantCount;
-        }
-
-        recordsToCreate.push({ fields });
       }
     }
 
@@ -196,7 +220,7 @@ export class TopIssuesGenerator {
 
     if (recordsToUpdate.length > 0) {
       await this.storage.batchUpdateRecords(TABLES.TOP_ISSUES, recordsToUpdate);
-      console.log(`[Top问题] 更新 ${recordsToUpdate.length} 条问题`);
+      console.log(`[Top问题] 更新 ${recordsToUpdate.length} 条问题（仅排名和统计数据）`);
     }
   }
 
@@ -286,7 +310,7 @@ export class TopIssuesGenerator {
   }
 
   /**
-   * 按 Tag2 分组统计反馈数据
+   * 按 Tag2 分组统计反馈数据，同时跟踪每个 Tag2 下的 Tag3 和 Tag1 分布
    */
   private aggregateFeedbackData(feedbacks: BitableRecord[]): Map<string, IssueGroup> {
     const groups = new Map<string, IssueGroup>();
@@ -298,6 +322,8 @@ export class TopIssuesGenerator {
       if (!group) {
         group = {
           tag2,
+          tag3Counts: new Map(),
+          tag1Counts: new Map(),
           totalCount: 0,
           a4Count: 0,
           a5Count: 0,
@@ -309,6 +335,30 @@ export class TopIssuesGenerator {
       }
 
       group.totalCount++;
+
+      // 统计 Tag3 分布（一条反馈可能有多个 Tag3）
+      const tag3Val = feedback.fields[FEEDBACK_FIELDS.TAG3];
+      if (Array.isArray(tag3Val)) {
+        for (const t3 of tag3Val) {
+          const tag3Name = this.getTagNameFromRecordId(t3, 'tag3');
+          group.tag3Counts.set(tag3Name, (group.tag3Counts.get(tag3Name) || 0) + 1);
+        }
+      } else if (tag3Val) {
+        const tag3Name = this.getTagNameFromRecordId(tag3Val, 'tag3');
+        group.tag3Counts.set(tag3Name, (group.tag3Counts.get(tag3Name) || 0) + 1);
+      }
+
+      // 统计 Tag1 分布（用于确定所属模块）
+      const tag1Val = feedback.fields[FEEDBACK_FIELDS.TAG1];
+      if (Array.isArray(tag1Val)) {
+        for (const t1 of tag1Val) {
+          const tag1Name = this.getTagNameFromRecordId(t1, 'tag1');
+          group.tag1Counts.set(tag1Name, (group.tag1Counts.get(tag1Name) || 0) + 1);
+        }
+      } else if (tag1Val) {
+        const tag1Name = this.getTagNameFromRecordId(tag1Val, 'tag1');
+        group.tag1Counts.set(tag1Name, (group.tag1Counts.get(tag1Name) || 0) + 1);
+      }
 
       const scale = String(feedback.fields[FEEDBACK_FIELDS.TENANT_SCALE] || '');
       if (scale === 'A4') group.a4Count++;
@@ -330,7 +380,7 @@ export class TopIssuesGenerator {
    * 评分公式：count权重 * 数量归一化 + largeTenant权重 * 大租户占比 + quality权重 * 质量分（低NPS=高质量问题）
    */
   private calculateScores(groups: Map<string, IssueGroup>): TopIssue[] {
-    const issues: Array<TopIssue & { totalCount: number; largeTenantRatio: number; avgScore: number; score: number }> = [];
+    const issues: Array<TopIssue & { score: number }> = [];
 
     // 找出最大数量用于归一化
     let maxCount = 1;
@@ -341,7 +391,7 @@ export class TopIssuesGenerator {
     Array.from(groups.entries()).forEach(([_, group]) => {
       const largeTenantRatio = group.totalCount > 0 ? group.largeTenantCount / group.totalCount : 0;
       const avgScore = group.totalCount > 0 ? group.totalScore / group.totalCount : 0;
-      
+
       // 数量归一化 (0-1)
       const countScore = group.totalCount / maxCount;
       // 大租户占比 (0-1)
@@ -355,17 +405,43 @@ export class TopIssuesGenerator {
         this.weights.largeTenant * largeTenantScore +
         this.weights.quality * qualityScore;
 
+      // 从 Tag3 分布中找最高频的 Tag3
+      let topTag3 = '';
+      let maxTag3Count = 0;
+      for (const [tag3Name, count] of Array.from(group.tag3Counts.entries())) {
+        if (count > maxTag3Count) {
+          maxTag3Count = count;
+          topTag3 = tag3Name;
+        }
+      }
+
+      // 从 Tag1 分布中找最高频的 Tag1 作为所属模块
+      let topTag1 = '';
+      let maxTag1Count = 0;
+      for (const [tag1Name, count] of Array.from(group.tag1Counts.entries())) {
+        if (count > maxTag1Count) {
+          maxTag1Count = count;
+          topTag1 = tag1Name;
+        }
+      }
+
       issues.push({
         index: '',
         tag2: group.tag2,
+        module: topTag1,
+        tag3: topTag3,
+        totalCount: group.totalCount,
+        largeTenantRatio,
+        avgScore,
+        a4Count: group.a4Count,
+        a5Count: group.a5Count,
+        a6Count: group.a6Count,
+        largeTenantCount: group.largeTenantCount,
         manualPriority: 0,
         owner: '',
         resolution: '',
         status: '待讨论',
         iterationPeriod: '待定',
-        totalCount: group.totalCount,
-        largeTenantRatio,
-        avgScore,
         score,
       });
     });

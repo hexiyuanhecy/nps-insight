@@ -233,22 +233,24 @@ export function useConfigActions({
     }
   }, [config, loadConfig, pushToast, setBitableCreateOpen, setConfig, setTabLoading]);
 
-  const linkTable = useCallback(async (tabKey: ConfigTabKey) => {
+  const linkTable = useCallback(async (tabKey: ConfigTabKey, appToken?: string) => {
     if (!config) return;
-    if (!config.bitable.appToken) {
+    const tokenToUse = appToken || config.bitable.appToken;
+    if (!tokenToUse) {
       pushToast('请输入表格 App Token', 'error');
       return;
     }
     try {
       setTabLoading(tabKey, true);
-      const result = await linkBitable(config, config.bitable.appToken);
+      const result = await linkBitable(config, tokenToUse);
       if (result.success) {
         const newConfig = {
           ...config,
           bitable: {
             ...config.bitable,
             mode: 'link' as const,
-            url: `https://www.feishu.cn/base/${config.bitable.appToken}`,
+            appToken: tokenToUse,
+            url: `https://www.feishu.cn/base/${tokenToUse}`,
             status: 'linked' as const,
           },
         };
