@@ -1,6 +1,6 @@
 # NPS Insight AI 能力升级 - 实施计划（分解与优先级任务列表）
 
-## [ ] Task 1: AI 安全中间层（输入清洗 + Zod 输出校验）
+## [x] Task 1: AI 安全中间层（输入清洗 + Zod 输出校验）
 - **Priority**: high
 - **Depends On**: None
 - **Description**:
@@ -71,7 +71,7 @@
   - `programmatic` TR-4.3: 修改配置后，下次调用使用新模型（无需重启）
 - **Notes**: 需要先确认 AgnesAI 是否有小模型可用。如果没有，可以用 temperature 调低 + max_tokens 减少来模拟"轻量"。
 
-## [ ] Task 5: LLM Provider 增加流式接口
+## [x] Task 5: LLM Provider 增加流式接口
 - **Priority**: high
 - **Depends On**: Task 1
 - **Description**:

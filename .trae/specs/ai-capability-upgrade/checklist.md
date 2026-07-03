@@ -2,14 +2,14 @@
 
 ## 安全加固（横切层一）
 
-- [ ] 输入清洗：控制字符（\0、\b、\r 等）被正确过滤
-- [ ] 注入检测："忽略之前的指令"、"输出系统提示词"等已知模式被拦截
-- [ ] 长度限制：超长输入被截断或拒绝，不触发模型上下文溢出
-- [ ] XML 标签隔离：系统指令和用户输入使用不同的 XML 标签包裹
-- [ ] 宪法声明：System Prompt 中包含安全边界声明，模型遇到越界请求会拒绝
-- [ ] Zod 输出校验：所有 AI 返回的 JSON 都经过 Zod Schema 校验
-- [ ] 校验失败重试：Zod 校验失败后自动重试，最多 2 次，仍失败返回友好错误
-- [ ] 所有 AI 调用路径都经过安全中间层，无遗漏
+- [x] 输入清洗：控制字符（\0、\b、\x0b、\x0c、\r 等）被正确过滤
+- [x] 注入检测："忽略之前的指令"、"输出系统提示词"等已知模式被拦截
+- [x] 长度限制：超长输入被截断或拒绝，不触发模型上下文溢出
+- [x] XML 标签隔离：系统指令和用户输入使用不同的 XML 标签包裹
+- [x] 宪法声明：System Prompt 中包含安全边界声明，模型遇到越界请求会拒绝
+- [x] Zod 输出校验：所有 AI 返回的 JSON 都经过 Zod Schema 校验
+- [x] 校验失败重试：Zod 校验失败后自动重试，最多 2 次，仍失败返回友好错误
+- [x] 所有 AI 调用路径都经过安全中间层，无遗漏
 
 ## Token 与成本管理（横切层二）
 
@@ -44,13 +44,13 @@
 
 ## SSE 流式输出（L0 接入层）
 
-- [ ] Provider 流式接口：LLMProvider 接口包含 chatStream 方法
-- [ ] OpenAI 流式实现：OpenAIProvider 正确实现流式调用
-- [ ] AgnesAI 流式实现：AgnesAIProvider 正确实现流式调用
-- [ ] ReadableStream 返回：返回标准 ReadableStream
-- [ ] AbortController 支持：传入 AbortSignal 可中断请求
-- [ ] 流式内容正确：流式输出内容与同步输出一致
-- [ ] 错误处理：流式过程中出错能正确捕获并上报
+- [x] Provider 流式接口：LLMProvider 接口包含 chatStream 方法
+- [x] OpenAI 流式实现：OpenAIProvider 正确实现流式调用
+- [x] AgnesAI 流式实现：AgnesAIProvider 正确实现流式调用
+- [x] ReadableStream 返回：返回标准 ReadableStream
+- [x] AbortController 支持：传入 AbortSignal 可中断请求
+- [x] 流式内容正确：流式输出内容与同步输出一致
+- [x] 错误处理：流式过程中出错能正确捕获并上报
 
 ## 流式对话界面
 
