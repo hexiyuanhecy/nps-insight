@@ -186,6 +186,7 @@ export async function safeChatCompletionJSON<T>(
         temperature: temperature + attempt * 0.1,
         maxTokens,
         responseFormat: { type: 'json_object' },
+        taskType,
       });
 
       let parsed: unknown;

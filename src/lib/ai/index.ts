@@ -6,6 +6,8 @@
 import OpenAI from 'openai';
 import { ZodSchema } from 'zod';
 import { safeChatCompletionJSON } from './security';
+import { countMessageTokens, countTokens, estimateCost } from './token-counter';
+import { logAIUsage } from './usage-logger';
 import { LLMProviderFactory } from '@/lib/llm/provider-factory';
 import { AIAnalysisRequest, AITagResult, AIBatchRequest, AIBatchResult, Priority } from '@/lib/types';
 
@@ -70,10 +72,14 @@ export async function chatCompletion(
     temperature?: number;
     maxTokens?: number;
     responseFormat?: { type: 'json_object' };
+    taskType?: string;
   } = {}
 ): Promise<string> {
   const client = getAIClient();
   const model = getModel();
+  const startTime = Date.now();
+  const taskType = options.taskType || 'unknown';
+  const inputTokens = countMessageTokens(messages, model);
 
   try {
     const response = await client.chat.completions.create({
@@ -89,6 +95,23 @@ export async function chatCompletion(
       throw new Error('AI返回内容为空');
     }
 
+    // 记录 Token 消耗与耗时
+    const outputTokens = response.usage?.completion_tokens ?? countTokens(content, model);
+    const totalTokens = inputTokens + outputTokens;
+    const durationMs = Date.now() - startTime;
+    const costUsd = estimateCost(inputTokens, outputTokens, model);
+
+    await logAIUsage({
+      timestamp: startTime,
+      model,
+      taskType,
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      durationMs,
+      costUsd,
+    });
+
     return content;
   } catch (error) {
     console.error('[AI] 聊天补全请求失败', error);
@@ -97,10 +120,62 @@ export async function chatCompletion(
 }
 
 /**
+ * 包装 ReadableStream，在流结束或取消时记录用量日志
+ */
+function wrapStreamWithUsageLogging(
+  stream: ReadableStream<Uint8Array>,
+  logBase: {
+    timestamp: number;
+    model: string;
+    taskType: string;
+    inputTokens: number;
+  }
+): ReadableStream<Uint8Array> {
+  const startTime = logBase.timestamp;
+  const reader = stream.getReader();
+
+  const logUsage = async (): Promise<void> => {
+    const durationMs = Date.now() - startTime;
+    await logAIUsage({
+      timestamp: startTime,
+      model: logBase.model,
+      taskType: logBase.taskType,
+      inputTokens: logBase.inputTokens,
+      outputTokens: 0,
+      totalTokens: logBase.inputTokens,
+      durationMs,
+      costUsd: 0,
+      isStream: true,
+    });
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+          await logUsage();
+        } else {
+          controller.enqueue(value);
+        }
+      } catch (error) {
+        controller.error(error);
+        await logUsage();
+      }
+    },
+    async cancel() {
+      await reader.cancel();
+      await logUsage();
+    },
+  });
+}
+
+/**
  * 发送流式聊天补全请求
  * 统一使用 LLMProviderFactory 创建 Provider，返回 SSE 格式字节流
  * @param messages 消息列表
- * @param options 额外选项，支持 temperature、maxTokens、abortSignal
+ * @param options 额外选项，支持 temperature、maxTokens、abortSignal、taskType
  * @returns SSE 格式的 ReadableStream
  */
 export async function chatCompletionStream(
@@ -109,11 +184,18 @@ export async function chatCompletionStream(
     temperature?: number;
     maxTokens?: number;
     abortSignal?: AbortSignal;
+    taskType?: string;
   }
 ): Promise<ReadableStream<Uint8Array>> {
+  const model = getModel();
+  const startTime = Date.now();
+  const taskType = options?.taskType || 'unknown';
+  const inputTokens = countMessageTokens(messages, model);
+
   try {
     const provider = LLMProviderFactory.createFromEnv();
-    return await provider.chatStream(messages, options);
+    const stream = await provider.chatStream(messages, options);
+    return wrapStreamWithUsageLogging(stream, { timestamp: startTime, model, taskType, inputTokens });
   } catch (error) {
     console.error('[AI] 流式聊天补全请求失败', error);
     throw error;
@@ -133,6 +215,7 @@ export async function chatCompletionJSON<T = unknown>(
     temperature?: number;
     maxTokens?: number;
     schema?: ZodSchema<T>;
+    taskType?: string;
   } = {}
 ): Promise<T> {
   if (options.schema) {
@@ -143,6 +226,7 @@ export async function chatCompletionJSON<T = unknown>(
     temperature: options.temperature,
     maxTokens: options.maxTokens,
     responseFormat: { type: 'json_object' },
+    taskType: options.taskType,
   });
 
   try {
