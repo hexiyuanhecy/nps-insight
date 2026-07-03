@@ -924,6 +924,14 @@ export function createHelpCard(): InteractiveMessageContent {
 }
 
 /**
+ * 获取系统名称（PRD-BOT-001/006：卡片标题使用 {系统名}）
+ * 优先读取 SYSTEM_NAME 环境变量，回退默认值 "NPS Insight"
+ */
+function getSystemName(): string {
+  return process.env.SYSTEM_NAME || 'NPS Insight'
+}
+
+/**
  * 创建周报通知卡片（PRD v6.0 第7.1节）
  */
 export function createWeeklyReportCard(data: {
@@ -941,6 +949,7 @@ export function createWeeklyReportCard(data: {
   }>
   scoreDistribution: Array<{ score: string; pct: number }>
   bitableUrl?: string
+  dashboardUrl?: string
   feedbackTableId?: string
   logPlatformUrl?: string
   hasNeedLogCheck: boolean
@@ -955,6 +964,7 @@ export function createWeeklyReportCard(data: {
     topIssues,
     scoreDistribution,
     bitableUrl,
+    dashboardUrl,
     feedbackTableId,
     logPlatformUrl: rawLogPlatformUrl,
     hasNeedLogCheck,
@@ -973,7 +983,7 @@ export function createWeeklyReportCard(data: {
       tag: 'div',
       text: {
         tag: 'lark_md',
-        content: `**📊 【Feelgood 打标周报】${weekNumber}**\n\n本周累计：${totalFeedbacks}条反馈（新增${newFeedbacks || 0}条）\n本周平均分：${avgScore || '-'}分\nAI已完成打标，待审核：${reviewCount}条`
+        content: `**📊 【${getSystemName()} 打标周报】${weekNumber}**\n\n本周累计：${totalFeedbacks}条反馈（新增${newFeedbacks || 0}条）\n本周平均分：${avgScore || '-'}分\nAI已完成打标，待审核：${reviewCount}条`
       }
     },
     { tag: 'hr' },
@@ -1029,7 +1039,7 @@ export function createWeeklyReportCard(data: {
     tag: 'button',
     text: { tag: 'plain_text', content: '完整看板' },
     type: 'default',
-    url: baseUrl
+    url: dashboardUrl || baseUrl
   })
   if (hasNeedLogCheck && logPlatformUrl)
     actions.push({
@@ -1057,7 +1067,7 @@ export function createWeeklyReportCard(data: {
     header: {
       title: {
         tag: 'lark_md',
-        content: `📊 【Feelgood 打标周报】${weekNumber}`
+        content: `📊 【${getSystemName()} 打标周报】${weekNumber}`
       },
       template: reviewWarning ? 'red' : 'blue'
     },
@@ -1100,7 +1110,7 @@ export function createMonthlyReportCard(data: {
       tag: 'div',
       text: {
         tag: 'lark_md',
-        content: `**📈 【Feelgood月度分析】${periodName}**`
+        content: `**📈 【${getSystemName()}月度分析】${periodName}**`
       }
     },
     { tag: 'hr' }
@@ -1220,7 +1230,7 @@ export function createMonthlyReportCard(data: {
     header: {
       title: {
         tag: 'lark_md',
-        content: `📈 【Feelgood月度分析】${periodName}`
+        content: `📈 【${getSystemName()}月度分析】${periodName}`
       },
       template: 'blue'
     },

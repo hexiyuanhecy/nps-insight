@@ -592,23 +592,22 @@ async function sendNotification(syncedCount: number): Promise<boolean> {
     const avgScore = scoreCount > 0 ? (scoreSum / scoreCount).toFixed(1) : '0';
     const weekNum = `第${getISOWeek(today)}周`;
 
-    await feishuBot.sendCardMessage(
-      chatId,
-      createWeeklyReportCard({
-        weekNumber: `${today.getFullYear()}年${weekNum}`,
-        totalFeedbacks: scoreCount,
-        newFeedbacks: syncedCount,
-        avgScore: Number(avgScore),
-        reviewCount,
-        topIssues,
-        scoreDistribution,
-        bitableUrl: process.env.FEISHU_BITABLE_URL || process.env.BITABLE_URL || '',
-        feedbackTableId: process.env.BITABLE_FEEDBACK_TABLE_ID || '',
-        logPlatformUrl: process.env.LOG_PLATFORM_URL_TEMPLATE || process.env.LOG_PLATFORM_URL || '',
-        hasNeedLogCheck: needLogCheckCount > 0,
-        hasReviewNeeded: reviewCount > 0
-      })
-    );
+    const weeklyCard = createWeeklyReportCard({
+      weekNumber: `${today.getFullYear()}年${weekNum}`,
+      totalFeedbacks: scoreCount,
+      newFeedbacks: syncedCount,
+      avgScore: Number(avgScore),
+      reviewCount,
+      topIssues,
+      scoreDistribution,
+      bitableUrl: process.env.FEISHU_BITABLE_URL || process.env.BITABLE_URL || '',
+      feedbackTableId: process.env.BITABLE_FEEDBACK_TABLE_ID || '',
+      logPlatformUrl: process.env.LOG_PLATFORM_URL_TEMPLATE || process.env.LOG_PLATFORM_URL || '',
+      hasNeedLogCheck: needLogCheckCount > 0,
+      hasReviewNeeded: reviewCount > 0
+    });
+    // 通知发送加 30 秒超时保护，防止网络问题导致任务挂起
+    await withTimeout(feishuBot.sendCardMessage(chatId, weeklyCard), 30000, '通知发送');
 
     console.log(`[Cron] 通知发送成功`);
     return true;
@@ -703,7 +702,8 @@ async function getExistingFeedbackIds(startDate: Date, endDate: Date): Promise<S
 
 async function generateWeeklyDoc(): Promise<boolean> {
   try {
-    const result = await generateWeeklyReport(0);
+    // 周报文档生成含飞书API调用，加 120 秒超时保护防止挂起
+    const result = await withTimeout(generateWeeklyReport(0), 120000, '周报文档生成');
     console.log(`[Cron] 周报文档生成结果: success=${result.success}, documentUrl=${result.documentUrl}, error=${result.error}`);
     if (result.success && result.documentUrl) {
       console.log(`[Cron] 周报文档生成成功: ${result.documentUrl}`);

@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
         const message = `📊 **第${result.weekNumber}周周报**\n\n` +
           `• 新增反馈: ${result.totalFeedbacks} 条\n` +
           `• NPS 分数: ${result.npsScore}%\n` +
-          `• Top问题: ${result.topIssues.slice(0, Math.min(3, DEFAULT_TOP_N)).map((t) => t.tag1).join(', ') || '无'}\n` +
+          `• Top问题: ${result.topIssues.slice(0, Math.min(3, DEFAULT_TOP_N)).map((t) => t.tag3).join(', ') || '无'}\n` +
           (result.documentUrl ? `\n📄 [查看文档](${result.documentUrl})` : '');
 
         await notification.sendText(chatId, message);

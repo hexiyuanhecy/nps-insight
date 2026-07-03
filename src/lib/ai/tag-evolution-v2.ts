@@ -74,12 +74,26 @@ const EVOLUTION_PROMPT = `# 硬性执行规则（严格遵守，不可颠倒顺�
 // 数据读取
 // ============================================
 
+/**
+ * 带重试的异步调用（飞书 API 偶发 "Data not ready" 时自动重试）
+ */
+async function retryAsync<T>(fn: () => Promise<T>, retries = 2, delayMs = 1000): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (retries <= 0) throw e;
+    console.warn(`[TagEvolution] 调用失败，${delayMs}ms 后重试 (剩余${retries}次):`, e instanceof Error ? e.message : '未知错误');
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+    return retryAsync(fn, retries - 1, delayMs * 2);
+  }
+}
+
 async function fetchAllData() {
   const [feedbacks, tag1Records, tag2Records, tag3Records] = await Promise.all([
-    bitableClient.listRecords(TABLE_NAMES.FEEDBACK),
-    bitableClient.listRecords(TABLE_NAMES.TAG1),
-    bitableClient.listRecords(TABLE_NAMES.TAG2),
-    bitableClient.listRecords(TABLE_NAMES.TAG3),
+    retryAsync(() => bitableClient.listRecords(TABLE_NAMES.FEEDBACK)),
+    retryAsync(() => bitableClient.listRecords(TABLE_NAMES.TAG1)),
+    retryAsync(() => bitableClient.listRecords(TABLE_NAMES.TAG2)),
+    retryAsync(() => bitableClient.listRecords(TABLE_NAMES.TAG3)),
   ]);
 
   // ponytail: 简单映射，量小时 O(n) 扫一遍就行，不用抽函数

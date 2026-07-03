@@ -2,7 +2,6 @@
  * 月度任务核心逻辑
  * 抽离出来供内部直接调用，避免 HTTP fetch 的端口问题
  */
-import { TagEvolution, EvolutionReport } from '@/lib/ai/tag-evolution';
 import { runTagEvolutionV2, TagEvolutionResultV2 } from '@/lib/ai/tag-evolution-v2';
 import { TopIssuesGenerator } from '@/lib/analysis/top-issues';
 import { FormulaSync } from '@/lib/analysis/formula-sync';
@@ -307,10 +306,27 @@ async function runMonthlyTaskSingleUser(): Promise<MonthlyTaskResult> {
       console.error('[月度任务] 标签自进化失败:', evoErr);
     }
 
-    // 2. Top问题生成
-    console.log('[月度任务] 步骤2：Top问题生成');
+    // 2. 公式同步 + 读取权重（前移：用户调整的权重需反哺到本次 Top 问题排序）
+    console.log('[月度任务] 步骤2：公式同步 + 读取权重');
+    let currentWeights: SortWeights = { count: 0.5, largeTenant: 0.3, quality: 0.2 };
+    try {
+      const formulaSync = new FormulaSync(storage);
+      // 先同步（用户在多维表格调整的公式 → 系统存储）
+      await formulaSync.sync();
+      // 再读取最新权重，供 Top 问题排序使用
+      currentWeights = await formulaSync.getWeights();
+      result.formulaSync = true;
+      console.log('✅ 公式同步完成，当前权重:', currentWeights);
+    } catch (formulaErr) {
+      console.error('[月度任务] 公式同步失败:', formulaErr);
+    }
+
+    // 3. Top问题生成（注入反哺权重）
+    console.log('[月度任务] 步骤3：Top问题生成（使用反哺权重）');
     try {
       const generator = new TopIssuesGenerator(storage);
+      // 注入从 FormulaSync 读取的权重，使 Top 问题排序遵循用户配置
+      generator.setWeights(currentWeights);
       const topIssues = await generator.generate();
       result.topIssues = topIssues;
       console.log(`✅ Top问题生成完成，共 ${topIssues.length} 个`);
@@ -324,17 +340,6 @@ async function runMonthlyTaskSingleUser(): Promise<MonthlyTaskResult> {
       }
     } catch (topErr) {
       console.error('[月度任务] Top问题生成失败:', topErr);
-    }
-
-    // 3. 公式同步
-    console.log('[月度任务] 步骤3：公式同步');
-    try {
-      const formulaSync = new FormulaSync(storage);
-      await formulaSync.sync();
-      result.formulaSync = true;
-      console.log('✅ 公式同步完成');
-    } catch (formulaErr) {
-      console.error('[月度任务] 公式同步失败:', formulaErr);
     }
 
     // 4. 生成会议文档

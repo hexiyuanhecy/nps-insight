@@ -99,7 +99,7 @@ export async function analyzeFeedback(
 
   // result 是 { results: [...] } 格式，取第一条
   const raw = result?.results?.[0] || {};
-  return normalizeTagResult(raw, confidenceThreshold);
+  return normalizeTagResult(raw, confidenceThreshold, content);
 }
 
 // ============================================
@@ -206,7 +206,7 @@ export async function batchAnalyzeFeedbacks(
     return batch.map((fb, idx) => {
       const resultIdx = inputIndexMap.get(idx);
       const raw = resultIdx !== undefined ? resultsArray[resultIdx] : null;
-      const normalized = normalizeTagResult(raw || { tag1: [] as string[], tag2: [] as string[], tag3: [] as string[], confidence: 0, needLogCheck: false, translatedContent: '' } as any, confidenceThreshold);
+      const normalized = normalizeTagResult(raw || { tag1: [] as string[], tag2: [] as string[], tag3: [] as string[], confidence: 0, needLogCheck: false, translatedContent: '' } as any, confidenceThreshold, fb.content);
       return { success: true, result: normalized, recordId: fb.record_id };
     });
   } catch (error) {
@@ -435,6 +435,47 @@ export async function getAllTags(): Promise<TagRecord[]> {
 // 工具函数
 // ============================================
 
+// 无效 Tag3 黑名单：AI 偶尔会把元描述（如"测试数据"）当作 Tag3 返回，污染标签库
+// 命中黑名单时，用反馈原文前 20 字回退，并将置信度降为 0 触发人工审核
+const INVALID_TAG3_PATTERNS = [
+  /^测试数据$/,
+  /^测试$/,
+  /^test$/i,
+  /^未知$/,
+  /^无$/,
+  /^未分类$/,
+  /^暂无$/,
+  /^其他$/,
+];
+
+/**
+ * 过滤无效 Tag3，命中黑名单时用反馈内容前 20 字回退
+ * @param tag3Arr AI 返回的 Tag3 数组
+ * @param fallbackContent 反馈原文（用于回退）
+ * @returns { tags: 修正后的 Tag3 数组, sanitized: 是否发生过修正 }
+ */
+function sanitizeTag3(tag3Arr: string[], fallbackContent: string): { tags: string[]; sanitized: boolean } {
+  if (tag3Arr.length === 0) return { tags: [], sanitized: false };
+
+  let sanitized = false;
+  const cleaned = tag3Arr
+    .map(t => {
+      const trimmed = String(t || '').trim();
+      // 命中黑名单
+      if (INVALID_TAG3_PATTERNS.some(p => p.test(trimmed))) {
+        sanitized = true;
+        // 回退到反馈原文前 20 字（避免 Tag3 为空导致 reviewNeeded）
+        const fallback = (fallbackContent || '').trim().substring(0, 20);
+        console.warn(`[Tagger] 检测到无效 Tag3 "${trimmed}"，回退为反馈原文前 20 字: "${fallback}"`);
+        return fallback || '待人工审核';
+      }
+      return trimmed;
+    })
+    .filter(Boolean);
+
+  return { tags: cleaned, sanitized };
+}
+
 function normalizeTagResult(
   raw: {
     tag1: string[];
@@ -444,19 +485,26 @@ function normalizeTagResult(
     needLogCheck: boolean;
     translatedContent: string;
   },
-  confidenceThreshold: number
+  confidenceThreshold: number,
+  fallbackContent: string = ''
 ): AITagResult {
   const confidence = Math.max(0, Math.min(1, raw.confidence || 0.5));
   const tag1Arr = raw.tag1 || [];
   const tag2Arr = raw.tag2 || [];
   const tag3Arr = raw.tag3 || [];
-  const reviewNeeded = confidence < confidenceThreshold || tag1Arr.length === 0 || tag2Arr.length === 0 || tag3Arr.length === 0;
+
+  // 过滤无效 Tag3（如"测试数据"等元描述）
+  const { tags: sanitizedTag3, sanitized } = sanitizeTag3(tag3Arr, fallbackContent);
+
+  // 如果发生过修正，说明 AI 返回了无效 Tag3，强制降为 0 触发人工审核
+  const finalConfidence = sanitized ? 0 : confidence;
+  const reviewNeeded = finalConfidence < confidenceThreshold || tag1Arr.length === 0 || tag2Arr.length === 0 || sanitizedTag3.length === 0;
 
   return {
     tag1: (raw.tag1 || ['未分类']).filter(Boolean),
     tag2: (raw.tag2 || ['未分类']).filter(Boolean),
-    tag3: (raw.tag3 || ['未分类']).filter(Boolean),
-    confidence,
+    tag3: (sanitizedTag3.length > 0 ? sanitizedTag3 : ['未分类']),
+    confidence: finalConfidence,
     needLogCheck: !!raw.needLogCheck,
     reviewNeeded,
     translatedContent: raw.translatedContent || '',
