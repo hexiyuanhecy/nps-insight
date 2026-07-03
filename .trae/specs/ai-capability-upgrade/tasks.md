@@ -17,7 +17,7 @@
   - `human-judgement` TR-1.4: 代码评审确认所有 AI 调用路径都经过安全中间层
 - **Notes**: 不修改业务逻辑，只在外围包裹安全层。打标 Prompt 中的 XML 标签改造要小心，不能影响 AI 输出质量。
 
-## [ ] Task 2: Token 计数与调用日志
+## [x] Task 2: Token 计数与调用日志
 - **Priority**: high
 - **Depends On**: Task 1
 - **Description**:
