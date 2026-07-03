@@ -4,7 +4,9 @@
  * 支持标签缓存复用，避免每批重复查询
  */
 
-import { chatCompletionJSON } from './index';
+import { chatCompletionJSONSafe } from './index';
+import { sanitizeUserInput, CONSTITUTIONAL_REFUSAL } from './security';
+import { BatchTaggingResultSchema } from './schemas';
 import { generateBatchTaggingPrompt } from './prompts';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS } from '@/lib/feishu/constants';
@@ -81,25 +83,33 @@ export async function analyzeFeedback(
   const tag2List = existingTags.filter(t => t.tag2Name).map(t => t.tag2Name);
   const tag3List = existingTags.filter(t => t.tag3Name).map(t => t.tag3Name);
 
+  // 清洗用户输入，防止 Prompt 注入
+  const sanitizedContent = sanitizeUserInput(content);
+  const sanitizedReason = sanitizeUserInput(unsatisfactoryReason);
+
   const prompt = generateBatchTaggingPrompt(
-    [{ id: '0', content, score: 0, source, unsatisfactoryReason }],
+    [{ id: '0', content: sanitizedContent.cleaned, score: 0, source, unsatisfactoryReason: sanitizedReason.cleaned }],
     tag1List, tag2List, tag3List, confidenceThreshold
   );
 
-  const result = await chatCompletionJSON<{
-    results: Array<{
-      tag1: string[];
-      tag2: string[];
-      tag3: string[];
-      confidence: number;
-      needLogCheck: boolean;
-      translatedContent: string;
-    }>;
-  }>([{ role: 'user', content: prompt }], { temperature: 0.3 });
+  const securePrompt = `${prompt}\n\n${CONSTITUTIONAL_REFUSAL}`;
+
+  const result = await chatCompletionJSONSafe(
+    [{ role: 'user', content: securePrompt }],
+    BatchTaggingResultSchema,
+    { temperature: 0.3, taskType: 'analyzeFeedback' }
+  );
 
   // result 是 { results: [...] } 格式，取第一条
-  const raw = result?.results?.[0] || {};
-  return normalizeTagResult(raw, confidenceThreshold, content);
+  const raw = result.results[0] || {
+    tag1: [],
+    tag2: [],
+    tag3: [],
+    confidence: 0,
+    needLogCheck: false,
+    translatedContent: '',
+  };
+  return normalizeTagResult(raw, confidenceThreshold, sanitizedContent.cleaned);
 }
 
 // ============================================
@@ -130,19 +140,25 @@ export async function batchAnalyzeFeedbacks(
 
   const inputs = batch
     .filter(f => f.content)
-    .map((fb, idx) => ({
-      id: fb.record_id,
-      content: fb.content,
-      score: fb.score,
-      source: fb.source,
-      unsatisfactoryReason: fb.unsatReason,
-    }));
+    .map((fb) => {
+      // 清洗反馈内容与不满意原因，防止 Prompt 注入
+      const sanitizedContent = sanitizeUserInput(fb.content);
+      const sanitizedReason = sanitizeUserInput(fb.unsatReason);
+      return {
+        id: fb.record_id,
+        content: sanitizedContent.cleaned,
+        score: fb.score,
+        source: fb.source,
+        unsatisfactoryReason: sanitizedReason.cleaned,
+      };
+    });
 
   if (inputs.length === 0) {
     return batch.map(fb => ({ success: false, recordId: fb.record_id }));
   }
 
   const prompt = generateBatchTaggingPrompt(inputs, tag1List, tag2List, tag3List, confidenceThreshold);
+  const securePrompt = `${prompt}\n\n${CONSTITUTIONAL_REFUSAL}`;
 
   // ========== 日志：打印提交给 AI 的数据和 Prompt ==========
   console.log('\n' + '='.repeat(60));
@@ -161,22 +177,17 @@ export async function batchAnalyzeFeedbacks(
   // ========================================================
 
   try {
-    const result = await chatCompletionJSON<{
-      results: Array<{
-        tag1: string[];
-        tag2: string[];
-        tag3: string[];
-        confidence: number;
-        needLogCheck: boolean;
-        translatedContent: string;
-      }>;
-    }>([{ role: 'user', content: prompt }], { temperature: 0.3, maxTokens: 8192 });
+    const result = await chatCompletionJSONSafe(
+      [{ role: 'user', content: securePrompt }],
+      BatchTaggingResultSchema,
+      { temperature: 0.3, maxTokens: 8192, taskType: 'batchAnalyzeFeedbacks' }
+    );
 
     // ========== 日志：打印 AI 返回的数据 ==========
     console.log('\n' + '='.repeat(60));
     console.log('【AI 打标 - AI 返回结果】');
     console.log('='.repeat(60));
-    const resultsArray = result?.results || [];
+    const resultsArray = result.results;
     console.log(`✅ 返回结果数: ${resultsArray.length} 条`);
     resultsArray.forEach((r, idx) => {
       const sourceFb = inputs[idx];
@@ -206,7 +217,11 @@ export async function batchAnalyzeFeedbacks(
     return batch.map((fb, idx) => {
       const resultIdx = inputIndexMap.get(idx);
       const raw = resultIdx !== undefined ? resultsArray[resultIdx] : null;
-      const normalized = normalizeTagResult(raw || { tag1: [] as string[], tag2: [] as string[], tag3: [] as string[], confidence: 0, needLogCheck: false, translatedContent: '' } as any, confidenceThreshold, fb.content);
+      const normalized = normalizeTagResult(
+        raw || { tag1: [], tag2: [], tag3: [], confidence: 0, needLogCheck: false, translatedContent: '' },
+        confidenceThreshold,
+        fb.content
+      );
       return { success: true, result: normalized, recordId: fb.record_id };
     });
   } catch (error) {

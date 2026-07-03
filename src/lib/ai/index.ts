@@ -4,6 +4,8 @@
  */
 
 import OpenAI from 'openai';
+import { ZodSchema } from 'zod';
+import { safeChatCompletionJSON } from './security';
 import { AIAnalysisRequest, AITagResult, AIBatchRequest, AIBatchResult, Priority } from '@/lib/types';
 
 // ============================================
@@ -95,8 +97,9 @@ export async function chatCompletion(
 
 /**
  * 发送结构化JSON请求
+ * 支持可选的 Zod Schema 校验；未提供 schema 时保持原有 JSON.parse 行为
  * @param messages 消息列表
- * @param options 额外选项
+ * @param options 额外选项，可包含 zod schema
  * @returns 解析后的JSON对象
  */
 export async function chatCompletionJSON<T = unknown>(
@@ -104,10 +107,16 @@ export async function chatCompletionJSON<T = unknown>(
   options: {
     temperature?: number;
     maxTokens?: number;
+    schema?: ZodSchema<T>;
   } = {}
 ): Promise<T> {
+  if (options.schema) {
+    return safeChatCompletionJSON(messages, options.schema, options);
+  }
+
   const content = await chatCompletion(messages, {
-    ...options,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
     responseFormat: { type: 'json_object' },
   });
 
@@ -120,6 +129,25 @@ export async function chatCompletionJSON<T = unknown>(
   }
 }
 
+/**
+ * 带 Zod Schema 校验的 JSON 请求（推荐新业务使用）
+ * @param messages 消息列表
+ * @param schema Zod Schema
+ * @param options 额外选项
+ * @returns 校验通过的 JSON 对象
+ */
+export async function chatCompletionJSONSafe<T = unknown>(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  schema: ZodSchema<T>,
+  options: {
+    temperature?: number;
+    maxTokens?: number;
+    taskType?: string;
+  } = {}
+): Promise<T> {
+  return safeChatCompletionJSON(messages, schema, options);
+}
+
 // ============================================
 // 便捷导出
 // ============================================
@@ -127,5 +155,6 @@ export async function chatCompletionJSON<T = unknown>(
 export const aiClient = {
   chatCompletion,
   chatCompletionJSON,
+  chatCompletionJSONSafe,
   getModel,
 };

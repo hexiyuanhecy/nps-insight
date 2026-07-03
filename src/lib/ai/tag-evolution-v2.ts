@@ -7,7 +7,9 @@
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS, FEEDBACK_FIELDS } from '@/lib/feishu/constants';
 import { BitableRecord } from '@/lib/types';
-import { chatCompletionJSON } from './index';
+import { chatCompletionJSONSafe } from './index';
+import { TagEvolutionResultSchema } from './schemas';
+import { sanitizeUserInput, CONSTITUTIONAL_REFUSAL } from './security';
 import { invalidateTagCache } from './tagger';
 
 // ============================================
@@ -243,19 +245,30 @@ async function callEvolutionAI(
   analysisTag2: Array<{ tagId: string; name: string; definition: string; usageCount: number; tag3Ids: string[]; totalFeedbacks: number }>,
   mode: 'full' | 'high_freq'
 ): Promise<AIResult> {
+  // 清洗样本中的用户反馈原文，防止 Prompt 注入
+  const sanitizedAnalysisTag3 = analysisTag3.map(t3 => ({
+    ...t3,
+    samples: t3.samples.map(sample => sanitizeUserInput(sample).cleaned),
+  }));
+
   const payload = {
     global_tag_reference: { tag1: tag1List, tag2: tag2List, tag3: tag3List },
-    analysis_data: { tag3_list: analysisTag3, tag2_list: analysisTag2 },
+    analysis_data: { tag3_list: sanitizedAnalysisTag3, tag2_list: analysisTag2 },
     mode: mode === 'full' ? '全量分析模式' : '高频过滤模式',
   };
 
   const messages = [{
     role: 'user' as const,
-    content: `${EVOLUTION_PROMPT}\n\n# 业务数据\n${JSON.stringify(payload, null, 2)}`,
+    content: `${EVOLUTION_PROMPT}\n\n${CONSTITUTIONAL_REFUSAL}\n\n# 业务数据\n${JSON.stringify(payload, null, 2)}`,
   }];
 
-  // ponytail: chatCompletionJSON 内部已经做了 JSON.parse + error，格式错了直接抛，不用再手工逐字段校验
-  return chatCompletionJSON<AIResult>(messages, { temperature: 0.1, maxTokens: 4096 });
+  const result = await chatCompletionJSONSafe(
+    messages,
+    TagEvolutionResultSchema,
+    { temperature: 0.1, maxTokens: 4096, taskType: 'tagEvolution' }
+  );
+
+  return result as AIResult;
 }
 
 // ============================================

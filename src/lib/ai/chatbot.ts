@@ -8,7 +8,9 @@
  * 3. 回答生成：用 LLM 将数据转化为自然语言回复
  */
 
-import { chatCompletion, chatCompletionJSON } from './index';
+import { chatCompletion, chatCompletionJSONSafe } from './index';
+import { IntentResultSchema } from './schemas';
+import { sanitizeUserInput, CONSTITUTIONAL_REFUSAL } from './security';
 import { Feedback } from '@/lib/types';
 
 // ============================================
@@ -106,24 +108,28 @@ export async function recognizeIntent(question: string): Promise<IntentResult> {
   "confidence": 0.95
 }`;
 
+  // 清洗用户问题，防止 Prompt 注入
+  const sanitizedQuestion = sanitizeUserInput(question);
+
   try {
-    const result = await chatCompletionJSON<IntentResult>(
+    const result = await chatCompletionJSONSafe(
       [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: question },
+        { role: 'system', content: `${systemPrompt}\n\n${CONSTITUTIONAL_REFUSAL}` },
+        { role: 'user', content: sanitizedQuestion.cleaned },
       ],
-      { temperature: 0.1, maxTokens: 512 }
+      IntentResultSchema,
+      { temperature: 0.1, maxTokens: 512, taskType: 'recognizeIntent' }
     );
 
     // 默认值填充
     return {
       intent: result.intent || 'unknown',
       params: {
-        timeRange: result.params?.timeRange || 'all',
-        tagFilter: result.params?.tagFilter,
-        scoreFilter: result.params?.scoreFilter,
-        limit: result.params?.limit || 10,
-        keywords: result.params?.keywords || [],
+        timeRange: result.params.timeRange || 'all',
+        tagFilter: result.params.tagFilter,
+        scoreFilter: result.params.scoreFilter,
+        limit: result.params.limit || 10,
+        keywords: result.params.keywords || [],
       },
       confidence: result.confidence || 0.5,
     };
