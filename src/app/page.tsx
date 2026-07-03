@@ -4,7 +4,7 @@
  */
 
 import Link from 'next/link';
-import { BarChart3, MessageSquare, Settings, Sparkles, Clock, Shield } from 'lucide-react';
+import { BarChart3, MessageSquare, Settings, Sparkles, Clock, Shield, Bot } from 'lucide-react';
 import { MermaidDiagramExport as MermaidDiagram } from '@/components/MermaidDiagram';
 import { FeatureCard } from '@/components/home/FeatureCard';
 import { RoleCards } from '@/components/home/RoleCards';
@@ -20,13 +20,22 @@ export default function HomePage() {
             <BarChart3 className="h-8 w-8 text-blue-600" />
             <span className="text-xl font-bold text-slate-900">NPS Insight</span>
           </div>
-          <Link
-            href="/admin"
-            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-          >
-            <Settings className="h-4 w-4" />
-            配置中心
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/chat"
+              className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              <Bot className="h-4 w-4" />
+              智能问答
+            </Link>
+            <Link
+              href="/admin"
+              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            >
+              <Settings className="h-4 w-4" />
+              配置中心
+            </Link>
+          </div>
         </div>
       </nav>
 
