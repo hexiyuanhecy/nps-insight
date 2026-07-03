@@ -6,6 +6,7 @@
 import OpenAI from 'openai';
 import { ZodSchema } from 'zod';
 import { safeChatCompletionJSON } from './security';
+import { LLMProviderFactory } from '@/lib/llm/provider-factory';
 import { AIAnalysisRequest, AITagResult, AIBatchRequest, AIBatchResult, Priority } from '@/lib/types';
 
 // ============================================
@@ -96,6 +97,30 @@ export async function chatCompletion(
 }
 
 /**
+ * 发送流式聊天补全请求
+ * 统一使用 LLMProviderFactory 创建 Provider，返回 SSE 格式字节流
+ * @param messages 消息列表
+ * @param options 额外选项，支持 temperature、maxTokens、abortSignal
+ * @returns SSE 格式的 ReadableStream
+ */
+export async function chatCompletionStream(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  options?: {
+    temperature?: number;
+    maxTokens?: number;
+    abortSignal?: AbortSignal;
+  }
+): Promise<ReadableStream<Uint8Array>> {
+  try {
+    const provider = LLMProviderFactory.createFromEnv();
+    return await provider.chatStream(messages, options);
+  } catch (error) {
+    console.error('[AI] 流式聊天补全请求失败', error);
+    throw error;
+  }
+}
+
+/**
  * 发送结构化JSON请求
  * 支持可选的 Zod Schema 校验；未提供 schema 时保持原有 JSON.parse 行为
  * @param messages 消息列表
@@ -154,6 +179,7 @@ export async function chatCompletionJSONSafe<T = unknown>(
 
 export const aiClient = {
   chatCompletion,
+  chatCompletionStream,
   chatCompletionJSON,
   chatCompletionJSONSafe,
   getModel,

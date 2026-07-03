@@ -2,12 +2,15 @@
  * OpenAI LLM Provider（支持 GPT 和自定义 OpenAI 兼容 API）
  */
 
+import OpenAI from 'openai';
 import {
   LLMProvider,
   LLMConfig,
   LLMMessage,
   LLMResponse,
+  LLMStreamOptions,
 } from './base-provider';
+import { encodeSSE } from './stream-utils';
 
 export class OpenAIProvider implements LLMProvider {
   private apiKey: string;
@@ -77,5 +80,60 @@ export class OpenAIProvider implements LLMProvider {
       content: data.choices[0]?.message?.content || '',
       usage: data.usage,
     };
+  }
+
+  async chatStream(
+    messages: LLMMessage[],
+    options?: LLMStreamOptions
+  ): Promise<ReadableStream<Uint8Array>> {
+    const client = new OpenAI({
+      apiKey: this.apiKey,
+      baseURL: this.baseUrl,
+      timeout: 60000,
+      maxRetries: 2,
+    });
+
+    try {
+      // 使用 OpenAI SDK 发起流式请求
+      const stream = await client.chat.completions.create(
+        {
+          model: this.model,
+          messages,
+          temperature: options?.temperature ?? 0.3,
+          max_tokens: options?.maxTokens ?? 500,
+          stream: true,
+        },
+        {
+          signal: options?.abortSignal,
+        }
+      );
+
+      return new ReadableStream({
+        async start(controller) {
+          try {
+            // 遍历 SDK 返回的流式块
+            for await (const chunk of stream) {
+              const content = chunk.choices[0]?.delta?.content || '';
+              if (content) {
+                controller.enqueue(encodeSSE({ content }));
+              }
+            }
+            // 流正常结束，发送结束标记
+            controller.enqueue(encodeSSE({ done: true }));
+            controller.close();
+          } catch (error) {
+            // 用户取消请求时优雅关闭，避免抛错
+            if (error instanceof Error && error.name === 'AbortError') {
+              controller.close();
+            } else {
+              controller.error(error);
+            }
+          }
+        },
+      });
+    } catch (error) {
+      console.error('[OpenAIProvider] 流式请求失败', error);
+      throw error;
+    }
   }
 }

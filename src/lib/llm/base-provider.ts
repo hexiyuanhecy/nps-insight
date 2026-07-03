@@ -26,6 +26,13 @@ export interface LLMResponse {
   };
 }
 
+// 流式调用选项
+export interface LLMStreamOptions {
+  temperature?: number;
+  maxTokens?: number;
+  abortSignal?: AbortSignal;
+}
+
 // LLM Provider 接口
 export interface LLMProvider {
   /** 获取 Provider 类型 */
@@ -36,6 +43,12 @@ export interface LLMProvider {
 
   /** 发送对话请求 */
   chat(messages: LLMMessage[]): Promise<LLMResponse>;
+
+  /** 发送流式对话请求，返回 SSE 格式的字节流 */
+  chatStream(
+    messages: LLMMessage[],
+    options?: LLMStreamOptions
+  ): Promise<ReadableStream<Uint8Array>>;
 
   /** 获取默认配置 */
   getDefaultConfig(): Partial<LLMConfig>;

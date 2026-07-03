@@ -2,12 +2,15 @@
  * AgnesAI LLM Provider（默认）
  */
 
+import OpenAI from 'openai';
 import {
   LLMProvider,
   LLMConfig,
   LLMMessage,
   LLMResponse,
+  LLMStreamOptions,
 } from './base-provider';
+import { encodeSSE } from './stream-utils';
 
 export class AgnesAIProvider implements LLMProvider {
   private apiKey: string;
@@ -77,5 +80,57 @@ export class AgnesAIProvider implements LLMProvider {
       content: data.choices[0]?.message?.content || '',
       usage: data.usage,
     };
+  }
+
+  async chatStream(
+    messages: LLMMessage[],
+    options?: LLMStreamOptions
+  ): Promise<ReadableStream<Uint8Array>> {
+    const client = new OpenAI({
+      apiKey: this.apiKey,
+      baseURL: this.baseUrl,
+      timeout: 60000,
+      maxRetries: 2,
+    });
+
+    try {
+      // AgnesAI 为 OpenAI 兼容接口，复用 SDK 流式能力
+      const stream = await client.chat.completions.create(
+        {
+          model: this.model,
+          messages,
+          temperature: options?.temperature ?? 0.3,
+          max_tokens: options?.maxTokens ?? 500,
+          stream: true,
+        },
+        {
+          signal: options?.abortSignal,
+        }
+      );
+
+      return new ReadableStream({
+        async start(controller) {
+          try {
+            for await (const chunk of stream) {
+              const content = chunk.choices[0]?.delta?.content || '';
+              if (content) {
+                controller.enqueue(encodeSSE({ content }));
+              }
+            }
+            controller.enqueue(encodeSSE({ done: true }));
+            controller.close();
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+              controller.close();
+            } else {
+              controller.error(error);
+            }
+          }
+        },
+      });
+    } catch (error) {
+      console.error('[AgnesAIProvider] 流式请求失败', error);
+      throw error;
+    }
   }
 }
