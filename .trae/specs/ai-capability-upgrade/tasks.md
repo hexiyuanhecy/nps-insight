@@ -33,7 +33,7 @@
   - `programmatic` TR-2.3: `/api/ai/usage` 接口返回正确的月度统计数据
 - **Notes**: 不同模型 Tokenizer 不同，优先支持 cl100k_base（GPT-4 兼容模型）。费用估算按模型单价配置。
 
-## [ ] Task 3: Prompt 模板引擎（Handlebars 化）
+## [x] Task 3: Prompt 模板引擎（Handlebars 化）
 - **Priority**: medium
 - **Depends On**: Task 1
 - **Description**:

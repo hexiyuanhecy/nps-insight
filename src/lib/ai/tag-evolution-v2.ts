@@ -11,6 +11,7 @@ import { chatCompletionJSONSafe } from './index';
 import { TagEvolutionResultSchema } from './schemas';
 import { sanitizeUserInput, CONSTITUTIONAL_REFUSAL } from './security';
 import { invalidateTagCache } from './tagger';
+import { renderPrompt, TEMPLATE_NAMES, TagEvolutionContext } from './prompt-engine';
 
 // ============================================
 // 类型定义（只保留外部需要的，内部结构直接 inline）
@@ -46,31 +47,6 @@ interface AIResult {
   tag2_opt_result: { merge_tag2: MergeGroup[] };
   manual_review: string[];
 }
-
-// ============================================
-// 固定 Prompt（一字不改，来自文档）
-// ============================================
-
-const EVOLUTION_PROMPT = `# 硬性执行规则（严格遵守，不可颠倒顺序）
-1. 处理顺序强制：第一步处理所有Tag3（合并同义Tag3、对单Tag2下Tag3≥10的分组拆分生成新Tag2）；所有Tag3优化完毕后，第二步再处理全局Tag2合并；禁止颠倒顺序。
-2. Tag3合并规则：全局任意两个Tag3语义高度一致，无论归属哪个Tag2都需要合并；保留使用次数更高的标签为主标签。
-3. Tag3拆分规则：单个父Tag2下属Tag3总数≥10，且配套用户反馈能清晰分为2~3类独立业务场景，才生成新Tag2，分配对应Tag3；无法清晰分类则放入人工复核。
-4. Tag2合并规则：仅在全部Tag3处理完成后执行；整体业务场景高度重合的不同Tag2执行合并，保留使用频次更高Tag2。
-5. 参考素材：每条标签附带多条用户反馈原文（每条几十字），判断相似度必须结合反馈语义，不能仅依靠标签文字。
-6. 模糊判定规则：标签相似度中等、场景边界模糊、无法100%确定合并/拆分的标签，全部放入manual_review，禁止自动生成优化方案。
-7. 输出约束：只返回纯JSON字符串，无任何解释、无markdown、无多余文字，严格遵循下方固定输出结构。
-
-# 固定输出结构
-{
-  "tag3_opt_result": {
-    "merge_tag3": [{"merge_group":["tag3Id1","tag3Id2"],"retain_tag_id":"主tag3Id","reason":"合并依据描述"}],
-    "split_tag3_to_new_tag2": [{"origin_tag2_id":"原tag2Id","new_tag2_list":[{"new_tag2_name":"新模块名","bind_tag3_ids":["tag3Id列表"]}]}]
-  },
-  "tag2_opt_result": {
-    "merge_tag2": [{"merge_group":["tag2Id1","tag2Id2"],"retain_tag_id":"主tag2Id","reason":"合并依据描述"}]
-  },
-  "manual_review": ["标签ID组合+模糊原因，交由人工处理"]
-}`;
 
 // ============================================
 // 数据读取
@@ -251,15 +227,20 @@ async function callEvolutionAI(
     samples: t3.samples.map(sample => sanitizeUserInput(sample).cleaned),
   }));
 
-  const payload = {
-    global_tag_reference: { tag1: tag1List, tag2: tag2List, tag3: tag3List },
-    analysis_data: { tag3_list: sanitizedAnalysisTag3, tag2_list: analysisTag2 },
+  const context: TagEvolutionContext = {
     mode: mode === 'full' ? '全量分析模式' : '高频过滤模式',
+    globalTagReference: { tag1: tag1List, tag2: tag2List, tag3: tag3List },
+    analysisData: {
+      tag3List: sanitizedAnalysisTag3,
+      tag2List: analysisTag2,
+    },
   };
+
+  const prompt = renderPrompt(TEMPLATE_NAMES.TAG_EVOLUTION, context);
 
   const messages = [{
     role: 'user' as const,
-    content: `${EVOLUTION_PROMPT}\n\n${CONSTITUTIONAL_REFUSAL}\n\n# 业务数据\n${JSON.stringify(payload, null, 2)}`,
+    content: `${prompt}\n\n${CONSTITUTIONAL_REFUSAL}`,
   }];
 
   const result = await chatCompletionJSONSafe(

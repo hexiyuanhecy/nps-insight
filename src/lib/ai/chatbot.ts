@@ -11,6 +11,7 @@
 import { chatCompletion, chatCompletionJSONSafe } from './index';
 import { IntentResultSchema } from './schemas';
 import { sanitizeUserInput, CONSTITUTIONAL_REFUSAL } from './security';
+import { renderPrompt, TEMPLATE_NAMES, IntentRecognitionContext, AnswerGenerationContext } from './prompt-engine';
 import { Feedback } from '@/lib/types';
 
 // ============================================
@@ -67,49 +68,13 @@ export interface ChatContext {
  * @returns 意图解析结果
  */
 export async function recognizeIntent(question: string): Promise<IntentResult> {
-  const systemPrompt = `你是 NPS Insight 智能问答系统的意图识别引擎。
-
-你的任务是将用户的自然语言问题解析为结构化的查询意图。
-
-支持的意图类型：
-- nps_overview: NPS总体概况（如"NPS多少分"、"总体情况"）
-- score_distribution: 评分分布（如"各分数段分布"、"几分的人最多"）
-- top_issues: TOP问题（如"最多问题是什么"、"主要抱怨"）
-- recent_feedback: 最新反馈（如"最近有什么反馈"、"最新的差评"）
-- tag_stats: 标签统计（如"Bug有多少"、"功能优化类反馈"）
-- trend_analysis: 趋势分析（如"最近有改善吗"、"趋势如何"）
-- specific_feedback: 特定反馈查询（如"关于打卡的反馈"、"定位相关"）
-- help: 帮助（如"怎么用"、"能做什么"）
-- unknown: 无法识别的意图
-
-时间范围参数(timeRange)：
-- today: 今天
-- week: 本周/最近7天
-- month: 本月/最近30天
-- quarter: 本季度
-- year: 本年
-- all: 全部时间（默认）
-
-评分过滤参数(scoreFilter)：
-- low: 1-2分（差评）
-- mid: 3分（中评）
-- high: 4-5分（好评）
-
-请严格按以下JSON格式输出，不要输出其他内容：
-{
-  "intent": "意图类型",
-  "params": {
-    "timeRange": "时间范围",
-    "tagFilter": "标签过滤",
-    "scoreFilter": "评分过滤",
-    "limit": 数量限制,
-    "keywords": ["关键词1", "关键词2"]
-  },
-  "confidence": 0.95
-}`;
-
   // 清洗用户问题，防止 Prompt 注入
   const sanitizedQuestion = sanitizeUserInput(question);
+
+  // 使用 Handlebars 模板渲染意图识别 Prompt
+  const systemPrompt = renderPrompt(TEMPLATE_NAMES.INTENT_RECOGNITION, {
+    question: sanitizedQuestion.cleaned,
+  });
 
   try {
     const result = await chatCompletionJSONSafe(
@@ -447,30 +412,22 @@ async function generateAnswer(
   queryResult: QueryResult,
   context?: ChatContext
 ): Promise<string> {
-  const systemPrompt = `你是 NPS Insight 智能问答助手，专门回答关于 feelgood 用户反馈数据的问题。
-
-回答规则：
-1. 用友好、专业的中文回答
-2. 数据要准确，不要编造
-3. 适当使用emoji增加可读性
-4. 如果数据为空，礼貌说明暂无相关数据
-5. 回答要简洁，控制在300字以内
-6. 对于反馈列表，只展示关键信息（内容摘要、评分、标签）
-
-当前是5分制NPS评分：
-- 4-5分：推荐者
-- 3分：被动者
-- 1-2分：贬损者`;
-
   const dataJson = JSON.stringify(queryResult.data, null, 2);
+
+  // 使用 Handlebars 模板渲染回答生成 Prompt
+  const userPrompt = renderPrompt(TEMPLATE_NAMES.ANSWER_GENERATION, {
+    question,
+    summary: queryResult.summary,
+    dataJson,
+  });
 
   try {
     const answer = await chatCompletion(
       [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `用户问题：${question}\n\n查询结果：${queryResult.summary}\n\n详细数据：\n${dataJson}\n\n请生成回答：` },
+        { role: 'system', content: CONSTITUTIONAL_REFUSAL },
+        { role: 'user', content: userPrompt },
       ],
-      { temperature: 0.5, maxTokens: 1024 }
+      { temperature: 0.5, maxTokens: 1024, taskType: 'generateAnswer' }
     );
 
     return answer.trim();

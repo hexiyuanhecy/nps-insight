@@ -77,13 +77,13 @@
 
 ## Prompt 模板引擎（L1 认知层）
 
-- [ ] Handlebars 集成：模板引擎使用 Handlebars
-- [ ] 模板目录结构：按场景分类（tagging / evolution / chat）
-- [ ] 模板渲染正确：渲染结果与原字符串拼接语义一致
-- [ ] 自动转义：用户输入中的 HTML/JS 特殊字符被自动转义
-- [ ] Zod Schema 配套：每个模板有对应的 Zod 输出 Schema
-- [ ] 新增场景无需改核心：新增模板 + Schema 即可扩展新功能
-- [ ] 版本标识：每个模板带有版本号，方便追踪
+- [x] Handlebars 集成：模板引擎使用 Handlebars
+- [x] 模板目录结构：按场景分类（tagging / evolution / chat）
+- [x] 模板渲染正确：渲染结果与原字符串拼接语义一致
+- [x] 自动转义：用户输入中的 HTML/JS 特殊字符被自动转义
+- [x] Zod Schema 配套：每个模板有对应的 Zod 输出 Schema
+- [x] 新增场景无需改核心：新增模板 + Schema 即可扩展新功能
+- [x] 版本标识：每个模板带有版本号，方便追踪
 
 ## 配置中心 AI 用量面板
 
