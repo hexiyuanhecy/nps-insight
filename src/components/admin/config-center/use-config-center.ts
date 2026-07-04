@@ -21,6 +21,7 @@ export function useConfigCenter() {
     feishu: false,
     datasource: false,
     tagging: false,
+    profile: false,
   });
   const [bitableCreateOpen, setBitableCreateOpen] = useState(false);
   const [bitableLinkOpen, setBitableLinkOpen] = useState(false);

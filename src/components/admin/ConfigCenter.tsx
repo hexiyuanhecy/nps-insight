@@ -6,10 +6,11 @@
 
 'use client';
 
-import { Database, Loader2, Settings, Sparkles } from 'lucide-react';
+import { Database, Loader2, Settings, Sparkles, User } from 'lucide-react';
 import { DatasourceTab } from '@/components/admin/config-center/DatasourceTab';
 import { FeishuTab } from '@/components/admin/config-center/FeishuTab';
 import { TaggingTab } from '@/components/admin/config-center/TaggingTab';
+import { ProfileTab } from '@/components/admin/config-center/ProfileTab';
 import { TopActionButtons } from '@/components/admin/config-center/TopActionButtons';
 import { useConfigCenter } from '@/components/admin/config-center/use-config-center';
 import { ToastStack } from '@/components/admin/config-center/ui';
@@ -20,6 +21,7 @@ const TAB_ICONS: Record<ConfigTabKey, React.ReactNode> = {
   feishu: <Settings className="h-4 w-4" />,
   datasource: <Database className="h-4 w-4" />,
   tagging: <Sparkles className="h-4 w-4" />,
+  profile: <User className="h-4 w-4" />,
 };
 
 export default function ConfigCenter() {
@@ -69,6 +71,7 @@ export default function ConfigCenter() {
       {ctrl.activeTab === 'feishu' && <FeishuTab ctrl={ctrl} />}
       {ctrl.activeTab === 'datasource' && <DatasourceTab ctrl={ctrl} />}
       {ctrl.activeTab === 'tagging' && <TaggingTab ctrl={ctrl} />}
+      {ctrl.activeTab === 'profile' && <ProfileTab ctrl={ctrl} />}
     </div>
   );
 }

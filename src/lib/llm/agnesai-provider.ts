@@ -1,5 +1,6 @@
 /**
  * AgnesAI LLM Provider（默认）
+ * 支持：基础聊天、JSON Object、JSON Schema 结构化输出、工具调用、流式输出
  */
 
 import OpenAI from 'openai';
@@ -11,6 +12,43 @@ import {
   LLMStreamOptions,
 } from './base-provider';
 import { encodeSSE } from './stream-utils';
+
+export interface ToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: {
+      type: 'object';
+      properties: Record<string, {
+        type: string;
+        enum?: string[] | number[];
+        description?: string;
+      }>;
+      required?: string[];
+    };
+  };
+}
+
+export interface ToolCallResult {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface StructuredResponse<T = unknown> {
+  content: string;
+  toolCalls?: ToolCallResult[];
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  data?: T;
+}
 
 export class AgnesAIProvider implements LLMProvider {
   private apiKey: string;
@@ -35,6 +73,15 @@ export class AgnesAIProvider implements LLMProvider {
     };
   }
 
+  private getClient(): OpenAI {
+    return new OpenAI({
+      apiKey: this.apiKey,
+      baseURL: this.baseUrl,
+      timeout: 60000,
+      maxRetries: 2,
+    });
+  }
+
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
       const response = await fetch(`${this.baseUrl}/models`, {
@@ -56,29 +103,99 @@ export class AgnesAIProvider implements LLMProvider {
   }
 
   async chat(messages: LLMMessage[]): Promise<LLMResponse> {
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages,
-        temperature: 0.3,
-        max_tokens: 500,
-      }),
+    const response = await this.getClient().chat.completions.create({
+      model: this.model,
+      messages: messages as OpenAI.ChatCompletionMessageParam[],
+      temperature: 0.3,
+      max_tokens: 500,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`AgnesAI API 错误: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
     return {
-      content: data.choices[0]?.message?.content || '',
-      usage: data.usage,
+      content: response.choices[0]?.message?.content || '',
+      usage: response.usage,
+    };
+  }
+
+  async chatWithJSON(messages: LLMMessage[]): Promise<StructuredResponse> {
+    const response = await this.getClient().chat.completions.create({
+      model: this.model,
+      messages: messages as OpenAI.ChatCompletionMessageParam[],
+      temperature: 0.3,
+      max_tokens: 500,
+      response_format: { type: 'json_object' },
+    });
+
+    const content = response.choices[0]?.message?.content || '';
+    return {
+      content,
+      usage: response.usage,
+      data: content ? JSON.parse(content) : undefined,
+    };
+  }
+
+  async chatWithJsonSchema<T>(
+    messages: LLMMessage[],
+    schema: Record<string, unknown>,
+    options?: {
+      temperature?: number;
+      maxTokens?: number;
+    }
+  ): Promise<StructuredResponse<T>> {
+    const response = await this.getClient().chat.completions.create({
+      model: this.model,
+      messages: messages as OpenAI.ChatCompletionMessageParam[],
+      temperature: options?.temperature ?? 0.3,
+      max_tokens: options?.maxTokens ?? 4096,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'structured_output',
+          strict: true,
+          schema,
+        },
+      },
+    });
+
+    const content = response.choices[0]?.message?.content || '';
+    return {
+      content,
+      usage: response.usage,
+      data: content ? JSON.parse(content) as T : undefined,
+    };
+  }
+
+  async chatWithTools(
+    messages: LLMMessage[],
+    tools: ToolDefinition[],
+    options?: {
+      temperature?: number;
+      maxTokens?: number;
+      toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
+    }
+  ): Promise<StructuredResponse> {
+    const response = await this.getClient().chat.completions.create({
+      model: this.model,
+      messages: messages as OpenAI.ChatCompletionMessageParam[],
+      temperature: options?.temperature ?? 0.3,
+      max_tokens: options?.maxTokens ?? 4096,
+      tools,
+      tool_choice: options?.toolChoice ?? 'auto',
+    });
+
+    const message = response.choices[0]?.message;
+    const toolCalls = message?.tool_calls?.map(tc => ({
+      id: tc.id,
+      type: tc.type,
+      function: {
+        name: tc.function.name,
+        arguments: tc.function.arguments,
+      },
+    })) || undefined;
+
+    return {
+      content: message?.content || '',
+      toolCalls,
+      usage: response.usage,
     };
   }
 
@@ -86,19 +203,11 @@ export class AgnesAIProvider implements LLMProvider {
     messages: LLMMessage[],
     options?: LLMStreamOptions
   ): Promise<ReadableStream<Uint8Array>> {
-    const client = new OpenAI({
-      apiKey: this.apiKey,
-      baseURL: this.baseUrl,
-      timeout: 60000,
-      maxRetries: 2,
-    });
-
     try {
-      // AgnesAI 为 OpenAI 兼容接口，复用 SDK 流式能力
-      const stream = await client.chat.completions.create(
+      const stream = await this.getClient().chat.completions.create(
         {
           model: this.model,
-          messages,
+          messages: messages as OpenAI.ChatCompletionMessageParam[],
           temperature: options?.temperature ?? 0.3,
           max_tokens: options?.maxTokens ?? 500,
           stream: true,

@@ -135,6 +135,7 @@ export const CONFIG_TAB_META = [
   { key: 'feishu' as const, name: '飞书配置', desc: '飞书应用 / 通知群 / 多维表格 / 大租户' },
   { key: 'datasource' as const, name: '数据源', desc: '反馈来源 / API / Excel / 日志平台' },
   { key: 'tagging' as const, name: '打标与分析配置', desc: 'AI 模型 / 标签体系 / 置信度 / 定时任务' },
+  { key: 'profile' as const, name: '用户画像', desc: '反馈特征签名 / AI 洞察 / 人工调整' },
 ];
 
 export function createDefaultConfig(): TabConfig {

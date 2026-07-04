@@ -35,6 +35,47 @@ import { runSyncTask } from '@/app/api/cron/sync/sync-task';
 import { runMonthlyTask } from '@/lib/monthly-task-runner';
 
 // ============================================
+// 系统级受保护配置
+// 这些字段只从环境变量读取，不允许 KV 存储覆盖，也不在配置中心修改
+// 原因：飞书应用凭证、AI API Key 等属于系统级配置，不应因误操作被覆盖
+// ============================================
+
+const SYSTEM_PROTECTED_CONFIG = {
+  feishu: {
+    appId: 'FEISHU_APP_ID',
+    appSecret: 'FEISHU_APP_SECRET',
+  },
+  ai: {
+    apiKey: 'AGNESAI_API_KEY',
+  },
+  dataSource: {
+    apiKey: 'DATA_SOURCE_API_KEY',
+  },
+  tenantSource: {
+    apiKey: 'TENANT_SOURCE_API_KEY',
+  },
+} as const;
+
+/**
+ * 检查某个配置路径是否是系统级受保护字段
+ * 受保护字段只从环境变量读取，不写入 KV
+ */
+function isSystemProtected(section: string, key: string): boolean {
+  const sectionConfig = (SYSTEM_PROTECTED_CONFIG as any)[section];
+  if (!sectionConfig) return false;
+  return !!sectionConfig[key];
+}
+
+/**
+ * 获取系统级受保护字段的环境变量值
+ */
+function getSystemProtectedValue(section: string, key: string, getEnvValue: (k: string) => string): string {
+  const envKey = (SYSTEM_PROTECTED_CONFIG as any)[section]?.[key];
+  if (!envKey) return '';
+  return getEnvValue(envKey);
+}
+
+// ============================================
 // 默认配置（当环境变量为空时使用）
 // ============================================
 
@@ -273,10 +314,13 @@ export async function GET(request: NextRequest) {
       return envConfig[key] || process.env[key] || '';
     };
 
-    // 构建完整配置对象，优先级：KV 存储 > .env 文件 > 环境变量 > 默认值
+    // 构建完整配置对象
+    // 规则：系统级受保护字段（凭证/密钥）只从环境变量读取，不允许 KV 覆盖
+    //       业务配置字段优先级：KV 存储 > .env 文件 > 环境变量 > 默认值
     const feishuConfig = {
-      appId: kvConfig?.feishu?.appId || getEnvValue('FEISHU_APP_ID'),
-      appSecret: kvConfig?.feishu?.appSecret || getEnvValue('FEISHU_APP_SECRET'),
+      // 系统级受保护字段：强制使用环境变量
+      appId: getSystemProtectedValue('feishu', 'appId', getEnvValue),
+      appSecret: getSystemProtectedValue('feishu', 'appSecret', getEnvValue),
     };
     const bitableConfig = {
       mode: (kvConfig?.bitable?.mode || getEnvValue('BITABLE_MODE') || 'link') as 'create' | 'link',
@@ -290,18 +334,21 @@ export async function GET(request: NextRequest) {
     };
     const dataSourceConfig = {
       apiUrl: kvConfig?.dataSource?.apiUrl || getEnvValue('DATA_SOURCE_API_URL'),
-      apiKey: kvConfig?.dataSource?.apiKey || getEnvValue('DATA_SOURCE_API_KEY'),
+      // 系统级受保护字段：强制使用环境变量
+      apiKey: getSystemProtectedValue('dataSource', 'apiKey', getEnvValue),
       queryParams: kvConfig?.dataSource?.queryParams || getEnvValue('DATA_SOURCE_QUERY_PARAMS') || '{ "start": "{{start_unix}}", "end": "{{end_unix}}" }',
       timeRule: (kvConfig?.dataSource?.timeRule || getEnvValue('DATA_SOURCE_TIME_RULE') || 'lastWeek') as 'lastWeek' | 'lastMonth' | 'custom',
     };
     const tenantSourceConfig = {
       apiUrl: kvConfig?.tenantSource?.apiUrl || getEnvValue('TENANT_SOURCE_API_URL'),
-      apiKey: kvConfig?.tenantSource?.apiKey || getEnvValue('TENANT_SOURCE_API_KEY'),
+      // 系统级受保护字段：强制使用环境变量
+      apiKey: getSystemProtectedValue('tenantSource', 'apiKey', getEnvValue),
       queryParams: kvConfig?.tenantSource?.queryParams || getEnvValue('TENANT_SOURCE_QUERY_PARAMS') || '',
     };
     const aiConfig = {
       provider: (kvConfig?.ai?.provider || getEnvValue('AGNESAI_PROVIDER') || 'agnesai') as 'agnesai' | 'custom',
-      apiKey: kvConfig?.ai?.apiKey || getEnvValue('AGNESAI_API_KEY'),
+      // 系统级受保护字段：强制使用环境变量
+      apiKey: getSystemProtectedValue('ai', 'apiKey', getEnvValue),
       baseUrl: kvConfig?.ai?.baseUrl || getEnvValue('AGNESAI_BASE_URL'),
       model: kvConfig?.ai?.model || getEnvValue('AGNESAI_MODEL') || 'agnes-2.0-flash',
     };
@@ -813,8 +860,19 @@ async function saveConfigV3(config: any) {
       logPlatform: config.logPlatform ? { ...currentConfig.logPlatform, ...config.logPlatform } : currentConfig.logPlatform,
       notification: config.notification ? { ...currentConfig.notification, ...config.notification } : currentConfig.notification,
     };
+
+    // 过滤掉系统级受保护字段，不写入 KV（避免误覆盖环境变量）
+    for (const section of Object.keys(SYSTEM_PROTECTED_CONFIG)) {
+      const sectionConfig = (SYSTEM_PROTECTED_CONFIG as any)[section];
+      if (kvConfig[section]) {
+        for (const key of Object.keys(sectionConfig)) {
+          delete kvConfig[section][key];
+        }
+      }
+    }
+
     await setConfig(ownerId, kvConfig);
-    console.log('[Config] 配置已同步到 KV storage');
+    console.log('[Config] 配置已同步到 KV storage（已过滤系统级受保护字段）');
   } catch (kvError) {
     console.error('[Config] KV 同步失败:', kvError);
     // KV 同步失败不影响主流程，只记录日志

@@ -55,19 +55,25 @@ async function getFeishuConfigFromKV(ownerId?: string): Promise<FeishuAppConfig 
 
 /**
  * 获取飞书应用配置（推荐使用）
- * 优先级：KV 存储 > 环境变量
+ * 优先级：环境变量 > KV 存储
+ * 
+ * 为什么环境变量优先级更高？
+ * - FEISHU_APP_ID / FEISHU_APP_SECRET 是系统级配置，部署时就确定了
+ * - KV 存储可能因误操作、测试、配置迁移等原因写入错误值
+ * - 环境变量由运维/部署流程保证正确性，更可靠
+ * - KV 存储仅作为 fallback（当环境变量未配置时使用）
  */
 export async function getFeishuAppConfig(ownerId?: string): Promise<FeishuAppConfig> {
-  // 1. 优先从 KV 存储读取
-  const kvConfig = await getFeishuConfigFromKV(ownerId);
-  if (kvConfig && kvConfig.appId && kvConfig.appSecret) {
-    return kvConfig;
-  }
-
-  // 2. 降级到环境变量
+  // 1. 优先从环境变量读取（系统级配置，最可靠）
   const envConfig = getFeishuConfigFromEnv();
   if (envConfig.appId && envConfig.appSecret) {
     return envConfig;
+  }
+
+  // 2. 降级到 KV 存储（仅当环境变量未配置时使用）
+  const kvConfig = await getFeishuConfigFromKV(ownerId);
+  if (kvConfig && kvConfig.appId && kvConfig.appSecret) {
+    return kvConfig;
   }
 
   // 3. 都没有，返回空配置

@@ -12,8 +12,9 @@ export interface LLMConfig {
 
 // LLM 消息
 export interface LLMMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  tool_call_id?: string;
 }
 
 // LLM 响应

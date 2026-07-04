@@ -2,15 +2,25 @@
  * AI打标引擎（PRD v6.0）
  * 流程：语言检测 → Tag3 → Tag2 → Tag1 → 置信度 → needLogCheck
  * 支持标签缓存复用，避免每批重复查询
+ * 
+ * 打标方式：
+ * 1. 新方式（推荐）：JSON Schema 结构化输出（AgnesAI 原生支持）
+ * 2. 旧方式（fallback）：Zod + 重试（兼容其他 LLM）
  */
 
-import { chatCompletionJSONSafe } from './index';
+import { chatCompletionJSONSafe, chatCompletionJsonSchema } from './index';
 import { sanitizeUserInput, CONSTITUTIONAL_REFUSAL } from './security';
 import { BatchTaggingResultSchema } from './schemas';
+import { BatchTaggingJsonSchema, BatchTaggingResult } from './json-schemas';
 import { generateBatchTaggingPrompt } from './prompts';
+import { completeTaggingProcessWithTools } from './tagger-tool-based';
+import { injectProfileToPrompt } from './user-profile';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS } from '@/lib/feishu/constants';
 import { DEFAULT_PAGE_SIZE, FIVE_MINUTES_MS } from '@/constants/app-constants';
+
+const USE_JSON_SCHEMA = process.env.AI_USE_JSON_SCHEMA !== 'false';
+const USE_TOOL_CALLING = process.env.AI_USE_TOOL_CALLING === 'true';
 
 // ============================================
 // 类型定义
@@ -71,36 +81,59 @@ export function invalidateTagCache(): void {
 
 /**
  * 对单条反馈进行AI打标
+ * @param ownerId 用户ID，用于注入用户画像
  */
 export async function analyzeFeedback(
   content: string,
   unsatisfactoryReason: string,
   source: string,
   existingTags: TagRecord[],
-  confidenceThreshold: number
+  confidenceThreshold: number,
+  ownerId?: string
 ): Promise<AITagResult> {
   const tag1List = existingTags.filter(t => t.tag1Name).map(t => t.tag1Name);
   const tag2List = existingTags.filter(t => t.tag2Name).map(t => t.tag2Name);
   const tag3List = existingTags.filter(t => t.tag3Name).map(t => t.tag3Name);
 
-  // 清洗用户输入，防止 Prompt 注入
   const sanitizedContent = sanitizeUserInput(content);
   const sanitizedReason = sanitizeUserInput(unsatisfactoryReason);
 
-  const prompt = generateBatchTaggingPrompt(
+  let prompt = generateBatchTaggingPrompt(
     [{ id: '0', content: sanitizedContent.cleaned, score: 0, source, unsatisfactoryReason: sanitizedReason.cleaned }],
     tag1List, tag2List, tag3List, confidenceThreshold
   );
 
+  if (ownerId) {
+    prompt = await injectProfileToPrompt(prompt, ownerId);
+  }
+
   const securePrompt = `${prompt}\n\n${CONSTITUTIONAL_REFUSAL}`;
 
-  const result = await chatCompletionJSONSafe(
-    [{ role: 'user', content: securePrompt }],
-    BatchTaggingResultSchema,
-    { temperature: 0.3, taskType: 'analyzeFeedback' }
-  );
+  let result: BatchTaggingResult;
+  if (USE_JSON_SCHEMA) {
+    try {
+      result = await chatCompletionJsonSchema<BatchTaggingResult>(
+        [{ role: 'user', content: securePrompt }],
+        BatchTaggingJsonSchema,
+        { temperature: 0.3, maxTokens: 2048, taskType: 'analyzeFeedback' }
+      );
+      console.log('[Tagger] 使用 JSON Schema 打标成功');
+    } catch (error) {
+      console.warn('[Tagger] JSON Schema 打标失败，降级到 Zod + 重试:', error);
+      result = await chatCompletionJSONSafe(
+        [{ role: 'user', content: securePrompt }],
+        BatchTaggingResultSchema,
+        { temperature: 0.3, taskType: 'analyzeFeedback' }
+      );
+    }
+  } else {
+    result = await chatCompletionJSONSafe(
+      [{ role: 'user', content: securePrompt }],
+      BatchTaggingResultSchema,
+      { temperature: 0.3, taskType: 'analyzeFeedback' }
+    );
+  }
 
-  // result 是 { results: [...] } 格式，取第一条
   const raw = result.results[0] || {
     tag1: [],
     tag2: [],
@@ -121,6 +154,7 @@ export async function analyzeFeedback(
  * @param batch 反馈数组（每条含 record_id, content, score, source, unsatReason）
  * @param existingTags 已有标签（用于 prompt 注入）
  * @param confidenceThreshold 置信度阈值（必须显式传递，默认值由调用方控制）
+ * @param ownerId 用户ID，用于注入用户画像
  * @returns 打标结果数组，与 batch 一一对应
  */
 export async function batchAnalyzeFeedbacks(
@@ -132,7 +166,8 @@ export async function batchAnalyzeFeedbacks(
     unsatReason: string;
   }>,
   existingTags: TagRecord[],
-  confidenceThreshold: number
+  confidenceThreshold: number,
+  ownerId?: string
 ): Promise<Array<{ success: boolean; result?: AITagResult; recordId: string }>> {
   const tag1List = existingTags.filter(t => t.tag1Name).map(t => t.tag1Name);
   const tag2List = existingTags.filter(t => t.tag2Name).map(t => t.tag2Name);
@@ -157,7 +192,12 @@ export async function batchAnalyzeFeedbacks(
     return batch.map(fb => ({ success: false, recordId: fb.record_id }));
   }
 
-  const prompt = generateBatchTaggingPrompt(inputs, tag1List, tag2List, tag3List, confidenceThreshold);
+  let prompt = generateBatchTaggingPrompt(inputs, tag1List, tag2List, tag3List, confidenceThreshold);
+  
+  if (ownerId) {
+    prompt = await injectProfileToPrompt(prompt, ownerId);
+  }
+  
   const securePrompt = `${prompt}\n\n${CONSTITUTIONAL_REFUSAL}`;
 
   // ========== 日志：打印提交给 AI 的数据和 Prompt ==========
@@ -177,11 +217,30 @@ export async function batchAnalyzeFeedbacks(
   // ========================================================
 
   try {
-    const result = await chatCompletionJSONSafe(
-      [{ role: 'user', content: securePrompt }],
-      BatchTaggingResultSchema,
-      { temperature: 0.3, maxTokens: 8192, taskType: 'batchAnalyzeFeedbacks' }
-    );
+    let result: BatchTaggingResult;
+    if (USE_JSON_SCHEMA) {
+      try {
+        result = await chatCompletionJsonSchema<BatchTaggingResult>(
+          [{ role: 'user', content: securePrompt }],
+          BatchTaggingJsonSchema,
+          { temperature: 0.3, maxTokens: 8192, taskType: 'batchAnalyzeFeedbacks' }
+        );
+        console.log('[Tagger] 批量打标使用 JSON Schema 成功');
+      } catch (error) {
+        console.warn('[Tagger] JSON Schema 批量打标失败，降级到 Zod + 重试:', error);
+        result = await chatCompletionJSONSafe(
+          [{ role: 'user', content: securePrompt }],
+          BatchTaggingResultSchema,
+          { temperature: 0.3, maxTokens: 8192, taskType: 'batchAnalyzeFeedbacks' }
+        );
+      }
+    } else {
+      result = await chatCompletionJSONSafe(
+        [{ role: 'user', content: securePrompt }],
+        BatchTaggingResultSchema,
+        { temperature: 0.3, maxTokens: 8192, taskType: 'batchAnalyzeFeedbacks' }
+      );
+    }
 
     // ========== 日志：打印 AI 返回的数据 ==========
     console.log('\n' + '='.repeat(60));
@@ -236,6 +295,10 @@ export async function batchAnalyzeFeedbacks(
 
 /**
  * 完整打标流程：AI分析 → 标签查找/创建 → 写入反馈记录
+ * 
+ * 打标模式：
+ * - 工具调用模式（USE_TOOL_CALLING=true）：AI 通过工具调用查询/创建标签，标签一致性更高
+ * - 标准模式：使用 JSON Schema 或 Zod + 重试进行打标
  */
 export async function completeTaggingProcess(
   feedbackId: string,
@@ -245,17 +308,38 @@ export async function completeTaggingProcess(
   unsatisfactoryReason: string,
   source: string,
   recordId: string,
-  confidenceThreshold: number = 0.8
+  confidenceThreshold: number = 0.8,
+  ownerId?: string
 ): Promise<{ success: boolean; result?: AITagResult; newTagsCreated: number }> {
   try {
     console.log(`[Tagger] 开始处理反馈: ${feedbackId}`);
+
+    if (USE_TOOL_CALLING) {
+      console.log('[Tagger] 使用工具调用模式打标');
+      const toolResult = await completeTaggingProcessWithTools(
+        feedbackId, content, score, module, unsatisfactoryReason, source, recordId, confidenceThreshold
+      );
+      if (toolResult.success && toolResult.result) {
+        const result: AITagResult = {
+          tag1: toolResult.result.tag1,
+          tag2: toolResult.result.tag2,
+          tag3: toolResult.result.tag3,
+          confidence: toolResult.result.confidence,
+          needLogCheck: toolResult.result.needLogCheck,
+          reviewNeeded: toolResult.result.reviewNeeded,
+          translatedContent: toolResult.result.translatedContent,
+        };
+        return { success: true, result, newTagsCreated: toolResult.result.newTagsCreated };
+      }
+      console.warn('[Tagger] 工具调用模式失败，降级到标准模式');
+    }
 
     // 1. 获取已有标签
     const existingTags = await getCachedTags();
 
     // 2. AI打标
     console.log(`[Tagger] 步骤1: AI分析反馈内容`);
-    const aiResult = await analyzeFeedback(content, unsatisfactoryReason, source, existingTags, confidenceThreshold);
+    const aiResult = await analyzeFeedback(content, unsatisfactoryReason, source, existingTags, confidenceThreshold, ownerId);
     console.log(`[Tagger] AI分析结果: tag1=${aiResult.tag1}, tag2=${aiResult.tag2}, tag3=${aiResult.tag3}, confidence=${aiResult.confidence}`);
 
     // 3. 创建/更新标签
