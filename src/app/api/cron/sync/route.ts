@@ -63,11 +63,15 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    // 验证Cron密钥
+    // 验证授权：支持三种方式
+    // 1. Vercel Cron触发（通过x-vercel-id头判断）
+    // 2. 手动触发（通过CRON_SECRET认证）
+    const vercelId = request.headers.get('x-vercel-id');
     const authHeader = request.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
 
-    if (cronSecret) {
+    // 如果配置了CRON_SECRET，且不是Vercel Cron触发，则需要验证
+    if (cronSecret && !vercelId) {
       const token = authHeader?.replace('Bearer ', '');
       if (token !== cronSecret) {
         return NextResponse.json(
