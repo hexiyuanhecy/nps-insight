@@ -12,6 +12,11 @@ import { extractMultiSelectFieldValue } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, TENANT_FIELDS } from '@/lib/feishu/constants';
 import { feishuBot, createWeeklyReportCard, sendErrorNotify } from '@/lib/feishu/bot';
 import { tagger } from '@/lib/ai/tagger';
+import { coldStartCluster } from '@/lib/ai/cold-start-cluster';
+import { embed } from '@/lib/ai/embedding';
+import { TagVectorStore } from '@/lib/ai/tag-vector-store';
+import { detectEvolution } from '@/lib/ai/embedding-evolution';
+import { getValue, setValue } from '@/lib/storage/kv-storage';
 import { SyncResult } from '@/lib/types';
 import { listAllConfigKeys, getConfig } from '@/lib/storage/kv-storage';
 import { generateWeeklyReport } from '@/lib/documents/weekly-generator';
@@ -239,6 +244,13 @@ async function runSyncTaskForUser(ownerId: string): Promise<SyncResult> {
       syncedCount += tagResult;
     }
 
+    // 触发 Embedding 进化检测（只检测，不执行）
+    try {
+      await runEvolutionDetection(ownerId);
+    } catch (evoErr) {
+      console.warn(`[Cron] 用户 ${ownerId} 进化检测失败（不影响主流程）:`, evoErr);
+    }
+
     await generateDailyReport();
 
     return {
@@ -348,93 +360,177 @@ async function autoTagFeedbacks(batchSize: number = DEFAULT_BATCH_SIZE, ownerId?
 
     console.log(`[Cron] 发现 ${untaggedRecords.length} 条未打标反馈，开始批量AI打标`);
     const existingTags = await tagger.getCachedTags();
+
+    // ==================== 冷启动聚类 ====================
+    // 触发条件：标签库为空 + 未打标反馈 >= 50 + 有 ownerId
+    const COLD_START_THRESHOLD = 50;
+    if (existingTags.length === 0 && untaggedRecords.length >= COLD_START_THRESHOLD && ownerId) {
+      console.log(`[Cron] 触发冷启动聚类: ${untaggedRecords.length} 条未打标反馈，标签库为空`);
+      try {
+        // 提取反馈文本
+        const texts = untaggedRecords.map(r =>
+          String(r.fields[FEEDBACK_FIELDS.CONTENT] || '') + ' ' +
+          String(r.fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] || '')
+        ).filter(t => t.trim().length > 0);
+
+        // 执行聚类
+        const clusters = await coldStartCluster(texts.slice(0, 500), {
+          minClusters: 5,
+          maxClusters: 30,
+          samplesPerCluster: 3,
+        });
+
+        console.log(`[Cron] 冷启动聚类完成: ${clusters.length} 个簇`);
+
+        // 为每个簇创建 Tag3 标签（用离质心最近的样本文本作为标签名）
+        const store = TagVectorStore.getInstance(ownerId);
+        let newTagCount = 0;
+
+        for (const cluster of clusters) {
+          if (cluster.size < 3) continue; // 跳过太小的簇
+
+          // 用第一个代表性样本作为标签名（取前 20 字）
+          const sampleText = cluster.samples[0]?.text || '';
+          const tagName = sampleText.trim().substring(0, 20);
+          if (!tagName) continue;
+
+          // 创建标签
+          try {
+            await tagger.ensureTagExists(tagName, 'tag3', ownerId);
+            newTagCount++;
+          } catch (tagErr) {
+            console.warn(`[Cron] 冷启动创建标签失败: ${tagName}`, tagErr);
+          }
+        }
+
+        // 同步向量库到 KV
+        await store.flushWrite();
+
+        console.log(`[Cron] 冷启动创建了 ${newTagCount} 个 Tag3 标签`);
+
+        // 刷新标签缓存
+        tagger.invalidateTagCache();
+      } catch (coldErr) {
+        console.warn('[Cron] 冷启动聚类失败，继续正常打标流程:', coldErr);
+      }
+    }
+    // ==================== 冷启动结束 ====================
+
     let successCount = 0;
     let failCount = 0;
 
+    // 将批次分组，每组 CONCURRENT_BATCHES 个批次并发执行
+    const CONCURRENT_BATCHES = 2; // 并发批次数，避免API限流
+    const batches: Array<{ records: typeof untaggedRecords; batchNum: number }> = [];
     for (let i = 0; i < untaggedRecords.length; i += batchSize) {
-      const batch = untaggedRecords.slice(i, i + batchSize);
-      const batchNum = Math.floor(i / batchSize) + 1;
-      const totalBatches = Math.ceil(untaggedRecords.length / batchSize);
-      console.log(`[Cron] 打标批次 ${batchNum}/${totalBatches}`);
+      batches.push({
+        records: untaggedRecords.slice(i, i + batchSize),
+        batchNum: Math.floor(i / batchSize) + 1,
+      });
+    }
+    const totalBatches = batches.length;
+    console.log(`[Cron] 共 ${totalBatches} 批，每批 ${batchSize} 条，并发度 ${CONCURRENT_BATCHES}`);
 
-      const t0 = Date.now();
-      const feedbacks = batch.map((record) => ({
-        record_id: record.record_id,
-        content: String(record.fields[FEEDBACK_FIELDS.CONTENT] || ''),
-        score: Number(record.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0),
-        source: String(record.fields[FEEDBACK_FIELDS.SOURCE] || ''),
-        unsatReason: String(record.fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] || ''),
-      }));
+    // 并发处理批次
+    for (let g = 0; g < batches.length; g += CONCURRENT_BATCHES) {
+      const group = batches.slice(g, g + CONCURRENT_BATCHES);
+      const groupResults = await Promise.allSettled(
+        group.map(async ({ records: batch, batchNum }) => {
+          const t0 = Date.now();
+          const feedbacks = batch.map((record) => ({
+            record_id: record.record_id,
+            content: String(record.fields[FEEDBACK_FIELDS.CONTENT] || ''),
+            score: Number(record.fields[FEEDBACK_FIELDS.NPS_SCORE] || 0),
+            source: String(record.fields[FEEDBACK_FIELDS.SOURCE] || ''),
+            unsatReason: String(record.fields[FEEDBACK_FIELDS.UNSATISFACTION_REASON] || ''),
+          }));
 
-      const results = await tagger.batchAnalyzeFeedbacks(feedbacks, existingTags, confidenceThreshold);
-      const elapsed = Date.now() - t0;
-      const batchSuccess = results.filter(r => r.success).length;
-      console.log(`[Cron] 批次 ${batchNum} AI分析完成 (${elapsed}ms, 成功 ${batchSuccess}/${results.length})`);
+          const results = await tagger.batchAnalyzeFeedbacks(feedbacks, existingTags, confidenceThreshold);
+          const elapsed = Date.now() - t0;
+          const batchSuccess = results.filter(r => r.success).length;
+          console.log(`[Cron] 批次 ${batchNum}/${totalBatches} AI分析完成 (${elapsed}ms, 成功 ${batchSuccess}/${results.length})`);
 
-      // 收集标签
-      const allTag1Names = new Set<string>();
-      const allTag2Names = new Set<string>();
-      const allTag3Names = new Set<string>();
+          // 收集标签
+          const allTag1Names = new Set<string>();
+          const allTag2Names = new Set<string>();
+          const allTag3Names = new Set<string>();
 
-      for (const result of results) {
-        if (!result.success || !result.result) continue;
-        result.result.tag1.forEach(t => t && allTag1Names.add(t));
-        result.result.tag2.forEach(t => t && allTag2Names.add(t));
-        result.result.tag3.forEach(t => t && allTag3Names.add(t));
-      }
-
-      // 确保多选字段选项存在
-      try {
-        await bitableClient.addMultiSelectOptions(TABLE_NAMES.FEEDBACK, FEEDBACK_FIELDS.TAG1, Array.from(allTag1Names));
-        await bitableClient.addMultiSelectOptions(TABLE_NAMES.FEEDBACK, FEEDBACK_FIELDS.TAG2, Array.from(allTag2Names));
-        await bitableClient.addMultiSelectOptions(TABLE_NAMES.FEEDBACK, FEEDBACK_FIELDS.TAG3, Array.from(allTag3Names));
-      } catch (optErr) {
-        console.error(`[Cron] 添加多选选项失败:`, optErr);
-      }
-
-      // 确保标签表记录存在
-      for (const name of Array.from(allTag1Names)) {
-        try { await tagger.ensureTagExists(name, 'tag1'); } catch (e) { /* skip */ }
-      }
-      for (const name of Array.from(allTag2Names)) {
-        try { await tagger.ensureTagExists(name, 'tag2'); } catch (e) { /* skip */ }
-      }
-      for (const name of Array.from(allTag3Names)) {
-        try { await tagger.ensureTagExists(name, 'tag3'); } catch (e) { /* skip */ }
-      }
-
-      // 写入标签
-      const updates = results
-        .filter(r => r.success && r.result)
-        .map(r => ({
-          record_id: r.recordId,
-          fields: {
-            [FEEDBACK_FIELDS.TAG1]: r.result!.tag1 || [],
-            [FEEDBACK_FIELDS.TAG2]: r.result!.tag2 || [],
-            [FEEDBACK_FIELDS.TAG3]: r.result!.tag3 || [],
-            [FEEDBACK_FIELDS.CONFIDENCE]: r.result!.confidence,
-            [FEEDBACK_FIELDS.NEED_LOG_CHECK]: r.result!.needLogCheck,
-            [FEEDBACK_FIELDS.REVIEW_NEEDED]: r.result!.reviewNeeded,
-            [FEEDBACK_FIELDS.TRANSLATED_CONTENT]: r.result!.translatedContent || '',
-            [FEEDBACK_FIELDS.STATUS]: '已打标',
-          },
-        }));
-
-      if (updates.length > 0) {
-        try {
-          await bitableClient.batchUpdateRecords(TABLE_NAMES.FEEDBACK, updates);
-          successCount += updates.length;
-        } catch (updateErr) {
-          console.error(`[Cron] 批量更新失败:`, updateErr);
-          for (const update of updates) {
-            try {
-              await bitableClient.updateRecord(TABLE_NAMES.FEEDBACK, update.record_id, update.fields);
-              successCount++;
-            } catch { failCount++; }
+          for (const result of results) {
+            if (!result.success || !result.result) continue;
+            result.result.tag1.forEach(t => t && allTag1Names.add(t));
+            result.result.tag2.forEach(t => t && allTag2Names.add(t));
+            result.result.tag3.forEach(t => t && allTag3Names.add(t));
           }
+
+          // 确保多选字段选项存在
+          try {
+            await bitableClient.addMultiSelectOptions(TABLE_NAMES.FEEDBACK, FEEDBACK_FIELDS.TAG1, Array.from(allTag1Names));
+            await bitableClient.addMultiSelectOptions(TABLE_NAMES.FEEDBACK, FEEDBACK_FIELDS.TAG2, Array.from(allTag2Names));
+            await bitableClient.addMultiSelectOptions(TABLE_NAMES.FEEDBACK, FEEDBACK_FIELDS.TAG3, Array.from(allTag3Names));
+          } catch (optErr) {
+            console.error(`[Cron] 批次 ${batchNum} 添加多选选项失败:`, optErr);
+          }
+
+          // 确保标签表记录存在
+          for (const name of Array.from(allTag1Names)) {
+            try { await tagger.ensureTagExists(name, 'tag1'); } catch (e) { /* skip */ }
+          }
+          for (const name of Array.from(allTag2Names)) {
+            try { await tagger.ensureTagExists(name, 'tag2'); } catch (e) { /* skip */ }
+          }
+          for (const name of Array.from(allTag3Names)) {
+            try { await tagger.ensureTagExists(name, 'tag3'); } catch (e) { /* skip */ }
+          }
+
+          // 写入标签
+          const updates = results
+            .filter(r => r.success && r.result)
+            .map(r => ({
+              record_id: r.recordId,
+              fields: {
+                [FEEDBACK_FIELDS.TAG1]: r.result!.tag1 || [],
+                [FEEDBACK_FIELDS.TAG2]: r.result!.tag2 || [],
+                [FEEDBACK_FIELDS.TAG3]: r.result!.tag3 || [],
+                [FEEDBACK_FIELDS.CONFIDENCE]: r.result!.confidence,
+                [FEEDBACK_FIELDS.NEED_LOG_CHECK]: r.result!.needLogCheck,
+                [FEEDBACK_FIELDS.REVIEW_NEEDED]: r.result!.reviewNeeded,
+                [FEEDBACK_FIELDS.TRANSLATED_CONTENT]: r.result!.translatedContent || '',
+                [FEEDBACK_FIELDS.STATUS]: '已打标',
+              },
+            }));
+
+          let batchSuccessCount = 0;
+          let batchFailCount = 0;
+          if (updates.length > 0) {
+            try {
+              await bitableClient.batchUpdateRecords(TABLE_NAMES.FEEDBACK, updates);
+              batchSuccessCount = updates.length;
+            } catch (updateErr) {
+              console.error(`[Cron] 批次 ${batchNum} 批量更新失败:`, updateErr);
+              for (const update of updates) {
+                try {
+                  await bitableClient.updateRecord(TABLE_NAMES.FEEDBACK, update.record_id, update.fields);
+                  batchSuccessCount++;
+                } catch { batchFailCount++; }
+              }
+            }
+          }
+          batchFailCount += results.filter(r => !r.success).length;
+
+          return { success: batchSuccessCount, fail: batchFailCount };
+        })
+      );
+
+      // 汇总结果
+      for (const result of groupResults) {
+        if (result.status === 'fulfilled') {
+          successCount += result.value.success;
+          failCount += result.value.fail;
+        } else {
+          console.error(`[Cron] 批次执行失败:`, result.reason);
+          failCount += batchSize;
         }
       }
-      failCount += results.filter(r => !r.success).length;
     }
 
     console.log(`[Cron] AI打标完成，总计成功 ${successCount}/${untaggedRecords.length}`);
@@ -799,6 +895,35 @@ async function runSyncWithMockData(): Promise<SyncResult> {
     const errorMessage = error instanceof Error ? error.message : '未知错误';
     details.push(`[Mock] 同步失败: ${errorMessage}`);
     return { success: false, syncedCount, failedCount, details, executedAt: new Date().toISOString() };
+  }
+}
+
+// ========== Embedding 进化检测 ==========
+
+/**
+ * 执行 Embedding 进化检测（只检测，不执行）
+ * 检测结果保存到 KV，供前端面板展示
+ */
+async function runEvolutionDetection(ownerId: string): Promise<void> {
+  const result = await detectEvolution(ownerId);
+
+  if (result.suggestions.length > 0) {
+    console.log(`[EmbeddingEvolution] 检测到 ${result.suggestions.length} 条进化建议`);
+    console.log(`[EmbeddingEvolution] 统计: 合并${result.stats.mergeCount}、` +
+      `拆分${result.stats.splitCount}、漂移${result.stats.driftCount}、` +
+      `层级调整${result.stats.hierarchyCount}`);
+  }
+
+  // 保存检测结果到 KV（供诊断面板展示）
+  try {
+    const key = `evolution_detection:${ownerId}`;
+    await setValue(key, JSON.stringify({
+      timestamp: Date.now(),
+      stats: result.stats,
+      suggestions: result.suggestions.slice(0, 50), // 只保留前 50 条
+    }));
+  } catch (saveErr) {
+    console.warn('[EmbeddingEvolution] 保存检测结果失败:', saveErr);
   }
 }
 

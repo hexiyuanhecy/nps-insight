@@ -119,13 +119,28 @@ export async function chatCompletion(
   const inputTokens = countMessageTokens(messages, model);
 
   try {
-    const response = await client.chat.completions.create({
+    // AgnesAI 2.0 Flash 不支持 response_format 参数，传了会导致返回空内容
+    // 改为在 Prompt 中明确要求 JSON 输出
+    const requestParams: {
+      model: string;
+      messages: typeof messages;
+      temperature: number;
+      max_tokens: number;
+      response_format?: { type: 'json_object' };
+    } = {
       model,
       messages,
       temperature,
       max_tokens: maxTokens,
-      response_format: options.responseFormat,
-    });
+    };
+
+    // 仅对支持 response_format 的模型传递此参数
+    // AgnesAI 2.0 Flash 当前不支持，跳过
+    if (options.responseFormat && model !== 'agnes-2.0-flash') {
+      requestParams.response_format = options.responseFormat;
+    }
+
+    const response = await client.chat.completions.create(requestParams);
 
     const content = response.choices[0]?.message?.content;
     if (!content) {

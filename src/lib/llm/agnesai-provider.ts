@@ -77,8 +77,8 @@ export class AgnesAIProvider implements LLMProvider {
     return new OpenAI({
       apiKey: this.apiKey,
       baseURL: this.baseUrl,
-      timeout: 60000,
-      maxRetries: 2,
+      timeout: 120000,
+      maxRetries: 1,
     });
   }
 
@@ -117,19 +117,34 @@ export class AgnesAIProvider implements LLMProvider {
   }
 
   async chatWithJSON(messages: LLMMessage[]): Promise<StructuredResponse> {
+    // AgnesAI 2.0 Flash 不支持 response_format，在 Prompt 中要求 JSON
+    const jsonMessages = [...messages];
+    // 确保 last message 包含 JSON 输出指令
+    if (jsonMessages.length > 0) {
+      const lastMsg = jsonMessages[jsonMessages.length - 1];
+      if (!lastMsg.content.includes('JSON')) {
+        lastMsg.content = lastMsg.content + '\n\n请严格输出JSON格式，不要添加额外文字。';
+      }
+    }
+
     const response = await this.getClient().chat.completions.create({
       model: this.model,
-      messages: messages as OpenAI.ChatCompletionMessageParam[],
+      messages: jsonMessages as OpenAI.ChatCompletionMessageParam[],
       temperature: 0.3,
-      max_tokens: 500,
-      response_format: { type: 'json_object' },
+      max_tokens: 4096,
     });
 
     const content = response.choices[0]?.message?.content || '';
+    let parsed: unknown;
+    try {
+      parsed = content ? JSON.parse(content) : undefined;
+    } catch {
+      parsed = undefined;
+    }
     return {
       content,
       usage: response.usage,
-      data: content ? JSON.parse(content) : undefined,
+      data: parsed,
     };
   }
 

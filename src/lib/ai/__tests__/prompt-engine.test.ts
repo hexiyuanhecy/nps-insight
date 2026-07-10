@@ -39,12 +39,12 @@ describe('Prompt 模板引擎', () => {
         confidenceThreshold: 0.8,
       });
 
-      expect(prompt).toContain('批量分析以下2条用户反馈');
-      expect(prompt).toContain('#1 [来源:app] [评分:1分] | 打卡失败');
-      expect(prompt).toContain('#2 [来源:web] [评分:3分] | 页面加载慢');
-      expect(prompt).toContain('Tag1: Bug, 体验优化');
-      expect(prompt).toContain('Tag2: 打卡模块, 性能问题');
-      expect(prompt).toContain('Tag3: 定位失败, 加载超时');
+      expect(prompt).toContain('批量分析2条用户反馈');
+      expect(prompt).toContain('#1 [app] [1分] 打卡失败');
+      expect(prompt).toContain('#2 [web] [3分] 页面加载慢');
+      expect(prompt).toContain('Bug, 体验优化');
+      expect(prompt).toContain('打卡模块, 性能问题');
+      expect(prompt).toContain('定位失败, 加载超时');
     });
 
     it('应该自动转义 HTML/JS 特殊字符', () => {
@@ -133,7 +133,7 @@ describe('Prompt 模板引擎', () => {
   describe('版本号', () => {
     it('应该从模板注释中提取版本号', () => {
       const version = getTemplateVersion(TEMPLATE_NAMES.BATCH_TAGGING);
-      expect(version).toBe('1.0.0');
+      expect(version).toBe('2.0.0');
     });
   });
 
@@ -147,9 +147,9 @@ describe('Prompt 模板引擎', () => {
         0.8
       );
 
-      expect(prompt).toContain('批量分析以下1条用户反馈');
+      expect(prompt).toContain('批量分析1条用户反馈');
       expect(prompt).toContain('打卡失败');
-      expect(prompt).toContain('Tag1: Bug');
+      expect(prompt).toContain('Bug');
       expect(prompt).toContain('"results"');
     });
   });

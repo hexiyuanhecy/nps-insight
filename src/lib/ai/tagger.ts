@@ -12,15 +12,21 @@ import { chatCompletionJSONSafe, chatCompletionJsonSchema } from './index';
 import { sanitizeUserInput, CONSTITUTIONAL_REFUSAL } from './security';
 import { BatchTaggingResultSchema } from './schemas';
 import { BatchTaggingJsonSchema, BatchTaggingResult } from './json-schemas';
-import { generateBatchTaggingPrompt } from './prompts';
+import { generateBatchTaggingPrompt, generateBatchTaggingPromptWithCandidates } from './prompts';
 import { completeTaggingProcessWithTools } from './tagger-tool-based';
 import { injectProfileToPrompt } from './user-profile';
+import { embed, searchSimilarTags, type SimilarTag } from './embedding';
+import { TagVectorStore } from './tag-vector-store';
 import { bitableClient } from '@/lib/feishu/bitable';
 import { TABLE_NAMES, FEEDBACK_FIELDS, TAG1_FIELDS, TAG2_FIELDS, TAG3_FIELDS } from '@/lib/feishu/constants';
 import { DEFAULT_PAGE_SIZE, FIVE_MINUTES_MS } from '@/constants/app-constants';
 
-const USE_JSON_SCHEMA = process.env.AI_USE_JSON_SCHEMA !== 'false';
+// AgnesAI 2.0 Flash 不支持 response_format: json_schema，直接用 json_object
+const USE_JSON_SCHEMA = false;
 const USE_TOOL_CALLING = process.env.AI_USE_TOOL_CALLING === 'true';
+const USE_EMBEDDING = process.env.AI_USE_EMBEDDING !== 'false';
+const EMBEDDING_TOP_K = Number(process.env.EMBEDDING_TOP_K || 8);
+const EMBEDDING_MIN_SCORE = Number(process.env.EMBEDDING_MIN_SCORE || 0.6);
 
 // ============================================
 // 类型定义
@@ -76,6 +82,157 @@ export function invalidateTagCache(): void {
 }
 
 // ============================================
+// Embedding 候选检索（Tag2/Tag3）
+// ============================================
+
+interface TagCandidates {
+  tag1List: string[];
+  tag2List: string[];
+  tag3List: string[];
+  tag2Candidates: SimilarTag[];
+  tag3Candidates: SimilarTag[];
+  usedEmbedding: boolean;
+}
+
+/**
+ * 同步向量库：确保向量库中包含所有现有标签的向量
+ * 只在标签缓存刷新时调用一次
+ */
+async function syncTagVectors(existingTags: TagRecord[], ownerId?: string): Promise<void> {
+  if (!USE_EMBEDDING || !ownerId) return;
+
+  const store = TagVectorStore.getInstance(ownerId);
+  await store.ensureLoaded();
+
+  const storedCount = await store.getTagCount();
+  const totalTags = existingTags.length;
+
+  // 如果向量库为空或数量差异大，全量同步
+  if (storedCount === 0 || Math.abs(storedCount - totalTags) > 5) {
+    console.log(`[Embedding] 同步标签向量: ${totalTags} 个标签（当前向量库: ${storedCount}）`);
+    const tagsToEmbed: Array<{ tagId: string; tagName: string; vector: number[]; definition?: string }> = [];
+
+    for (const tag of existingTags) {
+      const tagName = tag.tag1Name || tag.tag2Name || tag.tag3Name;
+      if (!tagName) continue;
+
+      const existing = await store.getTag(tag.tagId);
+      if (existing) continue; // 已有，跳过
+
+      // 计算向量（逐条，避免并发太高）
+      const vec = await embed(tagName);
+      tagsToEmbed.push({ tagId: tag.tagId, tagName, vector: vec });
+    }
+
+    if (tagsToEmbed.length > 0) {
+      await store.batchUpsertTags(tagsToEmbed);
+      console.log(`[Embedding] 新增 ${tagsToEmbed.length} 个标签向量`);
+    }
+  }
+}
+
+/**
+ * 为单条反馈检索相似标签候选（仅 Tag2/Tag3）
+ * Tag1 数量少（~7个），不需要 embedding
+ */
+async function getTagCandidatesForFeedback(
+  content: string,
+  unsatisfactoryReason: string,
+  existingTags: TagRecord[],
+  ownerId?: string
+): Promise<TagCandidates> {
+  const tag1List = existingTags.filter(t => t.tag1Name).map(t => t.tag1Name);
+  const tag2List = existingTags.filter(t => t.tag2Name).map(t => t.tag2Name);
+  const tag3List = existingTags.filter(t => t.tag3Name).map(t => t.tag3Name);
+
+  // embedding 关闭或无 ownerId，返回全量
+  if (!USE_EMBEDDING || !ownerId) {
+    return { tag1List, tag2List, tag3List, tag2Candidates: [], tag3Candidates: [], usedEmbedding: false };
+  }
+
+  try {
+    const store = TagVectorStore.getInstance(ownerId);
+    const vectorMap = await store.getVectorMap();
+
+    if (Object.keys(vectorMap).length === 0) {
+      // 向量库为空，返回全量
+      return { tag1List, tag2List, tag3List, tag2Candidates: [], tag3Candidates: [], usedEmbedding: false };
+    }
+
+    // 构造查询文本（反馈内容 + 不满意原因）
+    const queryText = `${content} ${unsatisfactoryReason}`.trim();
+    const queryVec = await embed(queryText, 'query');
+
+    // 检索所有标签的 Top-K（后续按层级过滤）
+    const allCandidates = searchSimilarTags(queryVec, vectorMap, EMBEDDING_TOP_K * 3, EMBEDDING_MIN_SCORE);
+
+    // 按层级分类
+    const tag2Set = new Set(tag2List);
+    const tag3Set = new Set(tag3List);
+
+    const tag2Candidates: SimilarTag[] = [];
+    const tag3Candidates: SimilarTag[] = [];
+
+    for (const cand of allCandidates) {
+      if (tag2Set.has(cand.tagName) && tag2Candidates.length < EMBEDDING_TOP_K) {
+        tag2Candidates.push(cand);
+      } else if (tag3Set.has(cand.tagName) && tag3Candidates.length < EMBEDDING_TOP_K) {
+        tag3Candidates.push(cand);
+      }
+    }
+
+    // 如果候选太少（< 3），说明 embedding 可能不准，回退到全量
+    if (tag2Candidates.length < 3 && tag2List.length > 10) {
+      console.warn(`[Embedding] Tag2 候选不足 (${tag2Candidates.length})，回退全量`);
+      return { tag1List, tag2List, tag3List, tag2Candidates: [], tag3Candidates: [], usedEmbedding: false };
+    }
+
+    return {
+      tag1List,
+      tag2List: tag2Candidates.length > 0 ? tag2Candidates.map(c => c.tagName) : tag2List,
+      tag3List: tag3Candidates.length > 0 ? tag3Candidates.map(c => c.tagName) : tag3List,
+      tag2Candidates,
+      tag3Candidates,
+      usedEmbedding: true,
+    };
+  } catch (error) {
+    console.warn('[Embedding] 候选检索失败，回退全量:', error);
+    return { tag1List, tag2List, tag3List, tag2Candidates: [], tag3Candidates: [], usedEmbedding: false };
+  }
+}
+
+/**
+ * 为一批反馈检索候选标签（批量优化）
+ * 对每条反馈分别检索，返回与 batch 一一对应的候选
+ */
+async function batchGetTagCandidates(
+  batch: Array<{ content: string; unsatisfactoryReason: string }>,
+  existingTags: TagRecord[],
+  ownerId?: string
+): Promise<TagCandidates[]> {
+  if (!USE_EMBEDDING || !ownerId) {
+    const base = {
+      tag1List: existingTags.filter(t => t.tag1Name).map(t => t.tag1Name),
+      tag2List: existingTags.filter(t => t.tag2Name).map(t => t.tag2Name),
+      tag3List: existingTags.filter(t => t.tag3Name).map(t => t.tag3Name),
+      tag2Candidates: [] as SimilarTag[],
+      tag3Candidates: [] as SimilarTag[],
+      usedEmbedding: false,
+    };
+    return batch.map(() => base);
+  }
+
+  // 先同步向量库
+  await syncTagVectors(existingTags, ownerId);
+
+  const results: TagCandidates[] = [];
+  for (const item of batch) {
+    results.push(await getTagCandidatesForFeedback(item.content, item.unsatisfactoryReason, existingTags, ownerId));
+  }
+  return results;
+}
+
+// ============================================
 // 单条反馈打标
 // ============================================
 
@@ -91,17 +248,35 @@ export async function analyzeFeedback(
   confidenceThreshold: number,
   ownerId?: string
 ): Promise<AITagResult> {
-  const tag1List = existingTags.filter(t => t.tag1Name).map(t => t.tag1Name);
-  const tag2List = existingTags.filter(t => t.tag2Name).map(t => t.tag2Name);
-  const tag3List = existingTags.filter(t => t.tag3Name).map(t => t.tag3Name);
-
   const sanitizedContent = sanitizeUserInput(content);
   const sanitizedReason = sanitizeUserInput(unsatisfactoryReason);
 
-  let prompt = generateBatchTaggingPrompt(
-    [{ id: '0', content: sanitizedContent.cleaned, score: 0, source, unsatisfactoryReason: sanitizedReason.cleaned }],
-    tag1List, tag2List, tag3List, confidenceThreshold
+  // Embedding 候选检索
+  const candidates = await getTagCandidatesForFeedback(
+    sanitizedContent.cleaned,
+    sanitizedReason.cleaned,
+    existingTags,
+    ownerId
   );
+
+  let prompt: string;
+  if (candidates.usedEmbedding) {
+    prompt = generateBatchTaggingPromptWithCandidates(
+      [{ id: '0', content: sanitizedContent.cleaned, score: 0, source, unsatisfactoryReason: sanitizedReason.cleaned }],
+      candidates.tag1List,
+      candidates.tag2List,
+      candidates.tag3List,
+      candidates.tag2Candidates,
+      candidates.tag3Candidates,
+      confidenceThreshold
+    );
+    console.log(`[Embedding] 单条打标使用候选: Tag2=${candidates.tag2Candidates.length}, Tag3=${candidates.tag3Candidates.length}`);
+  } else {
+    prompt = generateBatchTaggingPrompt(
+      [{ id: '0', content: sanitizedContent.cleaned, score: 0, source, unsatisfactoryReason: sanitizedReason.cleaned }],
+      candidates.tag1List, candidates.tag2List, candidates.tag3List, confidenceThreshold
+    );
+  }
 
   if (ownerId) {
     prompt = await injectProfileToPrompt(prompt, ownerId);
@@ -169,10 +344,6 @@ export async function batchAnalyzeFeedbacks(
   confidenceThreshold: number,
   ownerId?: string
 ): Promise<Array<{ success: boolean; result?: AITagResult; recordId: string }>> {
-  const tag1List = existingTags.filter(t => t.tag1Name).map(t => t.tag1Name);
-  const tag2List = existingTags.filter(t => t.tag2Name).map(t => t.tag2Name);
-  const tag3List = existingTags.filter(t => t.tag3Name).map(t => t.tag3Name);
-
   const inputs = batch
     .filter(f => f.content)
     .map((fb) => {
@@ -192,7 +363,74 @@ export async function batchAnalyzeFeedbacks(
     return batch.map(fb => ({ success: false, recordId: fb.record_id }));
   }
 
-  let prompt = generateBatchTaggingPrompt(inputs, tag1List, tag2List, tag3List, confidenceThreshold);
+  // Embedding 候选检索（批量，取并集）
+  const allCandidates = await batchGetTagCandidates(
+    inputs.map(i => ({ content: i.content, unsatisfactoryReason: i.unsatisfactoryReason })),
+    existingTags,
+    ownerId
+  );
+
+  // 取所有反馈候选的并集作为 Prompt 中的标签列表
+  const tag1List = allCandidates[0]?.tag1List || [];
+  const usedEmbedding = allCandidates.some(c => c.usedEmbedding);
+
+  let tag2List: string[];
+  let tag3List: string[];
+  let tag2Candidates: SimilarTag[] = [];
+  let tag3Candidates: SimilarTag[] = [];
+
+  if (usedEmbedding) {
+    const tag2Set = new Set<string>();
+    const tag3Set = new Set<string>();
+    const tag2ScoreMap = new Map<string, number>();
+    const tag3ScoreMap = new Map<string, number>();
+
+    for (const c of allCandidates) {
+      for (const cand of c.tag2Candidates) {
+        tag2Set.add(cand.tagName);
+        tag2ScoreMap.set(cand.tagName, Math.max(tag2ScoreMap.get(cand.tagName) || 0, cand.score));
+      }
+      for (const cand of c.tag3Candidates) {
+        tag3Set.add(cand.tagName);
+        tag3ScoreMap.set(cand.tagName, Math.max(tag3ScoreMap.get(cand.tagName) || 0, cand.score));
+      }
+    }
+
+    tag2List = Array.from(tag2Set);
+    tag3List = Array.from(tag3Set);
+
+    tag2Candidates = tag2List.map(name => ({
+      tagId: name,
+      tagName: name,
+      score: tag2ScoreMap.get(name) || 0,
+    })).sort((a, b) => b.score - a.score);
+
+    tag3Candidates = tag3List.map(name => ({
+      tagId: name,
+      tagName: name,
+      score: tag3ScoreMap.get(name) || 0,
+    })).sort((a, b) => b.score - a.score);
+
+    console.log(`[Embedding] 批量打标候选并集: Tag2=${tag2List.length}/${existingTags.filter(t=>t.tag2Name).length}, Tag3=${tag3List.length}/${existingTags.filter(t=>t.tag3Name).length}`);
+  } else {
+    tag2List = allCandidates[0]?.tag2List || [];
+    tag3List = allCandidates[0]?.tag3List || [];
+  }
+
+  let prompt: string;
+  if (usedEmbedding && tag2Candidates.length > 0 && tag3Candidates.length > 0) {
+    prompt = generateBatchTaggingPromptWithCandidates(
+      inputs,
+      tag1List,
+      tag2List,
+      tag3List,
+      tag2Candidates,
+      tag3Candidates,
+      confidenceThreshold
+    );
+  } else {
+    prompt = generateBatchTaggingPrompt(inputs, tag1List, tag2List, tag3List, confidenceThreshold);
+  }
   
   if (ownerId) {
     prompt = await injectProfileToPrompt(prompt, ownerId);
@@ -206,6 +444,7 @@ export async function batchAnalyzeFeedbacks(
   console.log('='.repeat(60));
   console.log(`📊 本次批次: ${inputs.length} 条反馈`);
   console.log(`🏷️  已有标签数量: Tag1=${tag1List.length}, Tag2=${tag2List.length}, Tag3=${tag3List.length}`);
+  console.log(`🧠  Embedding 候选: ${usedEmbedding ? '已启用' : '未启用'}`);
   console.log(`📏 置信度阈值: ${confidenceThreshold}`);
   console.log('\n--- 待分析反馈列表 ---');
   inputs.forEach((fb, idx) => {
@@ -223,7 +462,7 @@ export async function batchAnalyzeFeedbacks(
         result = await chatCompletionJsonSchema<BatchTaggingResult>(
           [{ role: 'user', content: securePrompt }],
           BatchTaggingJsonSchema,
-          { temperature: 0.3, maxTokens: 8192, taskType: 'batchAnalyzeFeedbacks' }
+          { temperature: 0.1, maxTokens: 4096, taskType: 'batchAnalyzeFeedbacks' }
         );
         console.log('[Tagger] 批量打标使用 JSON Schema 成功');
       } catch (error) {
@@ -231,14 +470,14 @@ export async function batchAnalyzeFeedbacks(
         result = await chatCompletionJSONSafe(
           [{ role: 'user', content: securePrompt }],
           BatchTaggingResultSchema,
-          { temperature: 0.3, maxTokens: 8192, taskType: 'batchAnalyzeFeedbacks' }
+          { temperature: 0.1, maxTokens: 4096, taskType: 'batchAnalyzeFeedbacks' }
         );
       }
     } else {
       result = await chatCompletionJSONSafe(
         [{ role: 'user', content: securePrompt }],
         BatchTaggingResultSchema,
-        { temperature: 0.3, maxTokens: 8192, taskType: 'batchAnalyzeFeedbacks' }
+        { temperature: 0.1, maxTokens: 4096, taskType: 'batchAnalyzeFeedbacks' }
       );
     }
 
@@ -346,15 +585,15 @@ export async function completeTaggingProcess(
     console.log(`[Tagger] 步骤2: 创建/更新标签`);
     let newTagsCreated = 0;
     for (const tag1 of aiResult.tag1) {
-      await ensureTagExists(tag1, 'tag1');
+      await ensureTagExists(tag1, 'tag1', ownerId);
       newTagsCreated++;
     }
     for (const tag2 of aiResult.tag2) {
-      await ensureTagExists(tag2, 'tag2');
+      await ensureTagExists(tag2, 'tag2', ownerId);
       newTagsCreated++;
     }
     for (const tag3 of aiResult.tag3) {
-      await ensureTagExists(tag3, 'tag3');
+      await ensureTagExists(tag3, 'tag3', ownerId);
       newTagsCreated++;
     }
 
@@ -372,6 +611,37 @@ export async function completeTaggingProcess(
       [FEEDBACK_FIELDS.STATUS]: '已打标',
     });
 
+    // 5. 更新向量质心（Embedding 模式下）
+    if (USE_EMBEDDING && ownerId && !aiResult.reviewNeeded) {
+      try {
+        const store = TagVectorStore.getInstance(ownerId);
+        const queryText = `${content} ${unsatisfactoryReason}`.trim();
+        const feedbackVec = await embed(queryText, 'passage');
+
+        // 收集所有需要更新质心的标签（只更新 tag2 和 tag3，tag1 数量少不需要）
+        const tagNames = [...aiResult.tag2, ...aiResult.tag3];
+        const allTags = await getCachedTags();
+
+        let updatedCount = 0;
+        for (const tagName of tagNames) {
+          const tagRecord = allTags.find(t =>
+            (t.table === 'tag2' && t.tag2Name === tagName) ||
+            (t.table === 'tag3' && t.tag3Name === tagName)
+          );
+          if (tagRecord) {
+            await store.updateCentroid(tagRecord.tagId, feedbackVec);
+            updatedCount++;
+          }
+        }
+
+        if (updatedCount > 0) {
+          console.log(`[Embedding] 更新质心: ${updatedCount} 个标签`);
+        }
+      } catch (err) {
+        console.warn('[Embedding] 质心更新失败（不影响打标结果）:', err);
+      }
+    }
+
     console.log(`[Tagger] 打标完成: ${feedbackId}`);
     return { success: true, result: aiResult, newTagsCreated };
   } catch (error) {
@@ -384,10 +654,12 @@ export async function completeTaggingProcess(
  * 确保标签存在于对应的标签表中
  * @param tagName 标签名称
  * @param level 标签层级（'tag1' | 'tag2' | 'tag3'）
+ * @param ownerId 用户ID（可选，传入时会同步新标签到向量库）
  */
 export async function ensureTagExists(
   tagName: string,
-  level: 'tag1' | 'tag2' | 'tag3'
+  level: 'tag1' | 'tag2' | 'tag3',
+  ownerId?: string
 ): Promise<string> {
   try {
     const existing = await getCachedTags();
@@ -434,6 +706,19 @@ export async function ensureTagExists(
       [nameField]: tagName,
     });
     console.log(`[Tagger] 创建新标签: ${level} - ${tagName}`);
+
+    // 同步到向量库（Embedding 模式下）
+    if (USE_EMBEDDING && ownerId) {
+      try {
+        const store = TagVectorStore.getInstance(ownerId);
+        const vec = await embed(tagName);
+        await store.upsertTag(tagId, tagName, vec);
+        console.log(`[Embedding] 新标签已加入向量库: ${tagName}`);
+      } catch (err) {
+        console.warn('[Embedding] 新标签向量同步失败（不影响打标结果）:', err);
+      }
+    }
+
     // 新标签创建后使缓存失效
     invalidateTagCache();
     return newRecord.record_id;

@@ -14,7 +14,7 @@ export const DEFAULT_PAGE_SIZE = 500;
 export const LARGE_PAGE_SIZE = 5000;
 
 /** AI 打标默认每批处理条数 */
-export const DEFAULT_BATCH_SIZE = 50;
+export const DEFAULT_BATCH_SIZE = 20;
 
 /** Mock 数据默认生成条数 */
 export const DEFAULT_MOCK_COUNT = 100;
