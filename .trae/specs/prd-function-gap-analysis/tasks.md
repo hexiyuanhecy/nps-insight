@@ -38,32 +38,34 @@
   - `programmatic` TR-BOT-3.2: 错误的凭证能验证失败并显示红色Toast
 - **Notes**: 已存在于 src/app/api/config/route.ts 的 testFeishu 函数中
 
-## [x] Task 4: 在vercel.json中添加默认Cron配置
+## [x] Task 4: 在腾讯云函数中配置定时触发器
 - **Priority**: high
 - **Depends On**: None
 - **Description**: 
-  - 在 `vercel.json` 中添加 `crons` 字段
-  - 配置周同步任务：`0 9 * * 1`（每周一09:00）
-  - 配置月分析任务：`0 0 1 * *`（每月1日00:00）
-  - 设置正确的路径和时区
+  - ~~在 `vercel.json` 中添加 `crons` 字段~~（已废弃）
+  - **腾讯云方案**：在腾讯云开发控制台创建定时触发器
+  - 周同步任务：`0 0 9 ? * MON`（每周一09:00）
+  - 月分析任务：`0 0 0 1 * ?`（每月1日00:00）
+  - 创建 [tencent-scf-triggers.json](file:///Users/xigua/ai Projects/nps-insight/tencent-scf-triggers.json) 配置文件
 - **Acceptance Criteria Addressed**: AC-CRON-01
 - **Test Requirements**:
-  - `programmatic` TR-CRON-4.1: vercel.json包含crons数组，且至少有2个任务
-  - `programmatic` TR-CRON-4.2: cron表达式正确（周任务每周一09:00，月任务每月1日00:00）
-- **Notes**: Vercel Cron使用UTC时区，需要注意时间转换
+  - `programmatic` TR-CRON-4.1: 触发器配置文件存在且包含两个触发器
+  - `programmatic` TR-CRON-4.2: cron表达式正确（SCF 6位格式）
+- **Notes**: 腾讯云 SCF 使用 6 位 Cron 格式（分 时 日 月 星期 年）
 
-## [x] Task 5: 实现定时任务配置动态同步
+## [x] Task 5: Cron API 改造为支持腾讯云触发器
 - **Priority**: medium
 - **Depends On**: Task 4
 - **Description**: 
-  - 已实现：配置中心已有定时任务配置界面，支持设置同步时间和分析时间
-  - vercel.json中已有默认的cron配置
-  - 注：由于Vercel的限制，cron配置变更需要重新部署才能生效，这是平台限制
+  - ~~创建 API 端点用于更新vercel.json的cron配置~~（不需要）
+  - 改造 Cron API 认证逻辑，支持腾讯云定时触发器（通过 User-Agent 识别）
+  - 提供 [deploy-tencent.sh](file:///Users/xigua/ai Projects/nps-insight/scripts/deploy-tencent.sh) 一键部署脚本
+  - 创建 [tencent-cloud-deploy.md](file:///Users/xigua/ai Projects/nps-insight/docs/tencent-cloud-deploy.md) 部署文档
 - **Acceptance Criteria Addressed**: AC-CRON-03
 - **Test Requirements**:
-  - `programmatic` TR-CRON-5.1: 修改配置中心的定时时间后，vercel.json中的cron表达式会更新
-  - `programmatic` TR-CRON-5.2: 配置中心能正确显示下次执行时间
-- **Notes**: 由于Vercel的限制，cron配置变更需要重新部署才能生效
+  - `programmatic` TR-CRON-5.1: Cron API 能识别腾讯云 User-Agent
+  - `programmatic` TR-CRON-5.2: 外部 curl 调用时通过 X-Cron-Secret 头能正常认证
+- **Notes**: 由于腾讯云的限制，触发器配置变更需要重新部署云函数才能生效
 
 ## [x] Task 6: 端到端测试验证
 - **Priority**: high
@@ -71,10 +73,10 @@
 - **Description**: 
   - 所有单元测试已通过（125个测试）
   - 构建成功
-  - 代码变更已完成
+  - 腾讯云部署脚本已就绪
 - **Acceptance Criteria Addressed**: AC-BOT-01, AC-BOT-02, AC-BOT-03, AC-CRON-01, AC-CRON-02, AC-CRON-03
 - **Test Requirements**:
   - `programmatic` TR-6.1: 所有单元测试通过 ✓
   - `human-judgment` TR-6.2: 手动测试飞书Bot响应正常（需要在真实飞书环境测试）
-  - `human-judgment` TR-6.3: 手动测试定时任务能正常触发（需要在Vercel部署后测试）
-- **Notes**: 代码层面的修复已完成，需要在真实环境中验证
+  - `human-judgment` TR-6.3: 手动测试定时任务能正常触发（需要在腾讯云部署后测试）
+- **Notes**: 代码层面的修复已完成，需要在真实腾讯云环境中验证

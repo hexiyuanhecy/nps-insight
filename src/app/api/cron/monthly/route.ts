@@ -15,22 +15,26 @@ export type { MonthlyTaskResult };
 /**
  * GET /api/cron/monthly
  * 执行月度任务
- * 
- * Vercel Cron会添加 x-vercel-id 和 x-vercel-signature 头
- * 同时支持手动触发时的 CRON_SECRET 认证
+ *
+ * 适配腾讯云定时触发器：
+ * 1. 腾讯云定时触发器会带特定User-Agent
+ * 2. 手动触发可通过 CRON_SECRET 或 X-Cron-Secret 认证
+ * 3. 本地开发绕过认证
  */
 export async function GET(request: NextRequest): Promise<NextResponse<MonthlyTaskResult>> {
-  // 验证授权：支持两种方式
-  // 1. Vercel Cron触发（通过x-vercel-id头判断）
-  // 2. 手动触发（通过CRON_SECRET认证）
-  const vercelId = request.headers.get('x-vercel-id');
+  // 验证授权
+  const userAgent = request.headers.get('user-agent') || '';
+  const isTencentCloud = userAgent.includes('SCF') || userAgent.includes('TencentCloud');
   const authHeader = request.headers.get('authorization');
+  const cronSecretHeader = request.headers.get('x-cron-secret');
   const cronSecret = process.env.CRON_SECRET;
+  const isDev = process.env.NODE_ENV === 'development';
 
-  // 如果配置了CRON_SECRET，且不是Vercel Cron触发，则需要验证
-  if (cronSecret && !vercelId) {
+  if (isTencentCloud || isDev) {
+    // 继续执行
+  } else if (cronSecret) {
     const token = authHeader?.replace('Bearer ', '');
-    if (token !== cronSecret) {
+    if (token !== cronSecret && cronSecretHeader !== cronSecret) {
       return NextResponse.json(
         { success: false, error: '未授权的访问', timestamp: Date.now(), evolution: null, topIssues: null, formulaSync: false, meetingDoc: null, notification: false } as MonthlyTaskResult,
         { status: 401 }
@@ -49,17 +53,19 @@ export async function GET(request: NextRequest): Promise<NextResponse<MonthlyTas
 export const maxDuration = 120;
 
 export async function POST(request: NextRequest): Promise<NextResponse<MonthlyTaskResult>> {
-  // 验证授权：支持三种方式
-  // 1. Vercel Cron触发（通过x-vercel-id头判断）
-  // 2. 手动触发（通过CRON_SECRET认证）
-  const vercelId = request.headers.get('x-vercel-id');
+  // 验证授权
+  const userAgent = request.headers.get('user-agent') || '';
+  const isTencentCloud = userAgent.includes('SCF') || userAgent.includes('TencentCloud');
   const authHeader = request.headers.get('authorization');
+  const cronSecretHeader = request.headers.get('x-cron-secret');
   const cronSecret = process.env.CRON_SECRET;
+  const isDev = process.env.NODE_ENV === 'development';
 
-  // 如果配置了CRON_SECRET，且不是Vercel Cron触发，则需要验证
-  if (cronSecret && !vercelId) {
+  if (isTencentCloud || isDev) {
+    // 继续执行
+  } else if (cronSecret) {
     const token = authHeader?.replace('Bearer ', '');
-    if (token !== cronSecret) {
+    if (token !== cronSecret && cronSecretHeader !== cronSecret) {
       return NextResponse.json(
         { success: false, error: '未授权', timestamp: Date.now(), evolution: null, topIssues: null, formulaSync: false, meetingDoc: null, notification: false } as MonthlyTaskResult,
         { status: 401 }

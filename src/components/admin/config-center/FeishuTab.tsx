@@ -425,9 +425,11 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
             <p className="text-sm font-medium text-blue-800">飞书Bot Webhook地址</p>
             <p className="mt-2 font-mono text-sm text-blue-600 break-all">
-              {process.env.VERCEL_URL 
-                ? `https://${process.env.VERCEL_URL}/api/webhook/feishu` 
-                : 'http://localhost:3002/api/webhook/feishu'}
+              {process.env.NEXT_PUBLIC_APP_URL 
+                ? `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook/feishu` 
+                : process.env.VERCEL_URL 
+                ? `https://${process.env.VERCEL_URL}/api/webhook/feishu`
+                : 'https://hexiyuan-d0g6ll45k94275810.service.tcloudbase.com/nps-insight-function/api/webhook/feishu'}
             </p>
             <p className="mt-2 text-xs text-blue-700">
               将此地址配置到飞书开放平台 → 应用 → 事件订阅 → 事件回调URL
@@ -435,8 +437,9 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
           </div>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs text-slate-600">
-              <span className="font-medium">💡 注意：</span>
-              此Webhook用于接收飞书Bot的消息事件（@Bot消息、入群通知等），与数据源Webhook（接收外部反馈推送）是不同的端点。
+              <span className="font-medium">💡 部署环境：</span>
+              当前部署在腾讯云开发（CloudBase）环境，URL为腾讯云函数网关分配的公网域名。详见
+              <a href="/docs/tencent-cloud-deploy.md" target="_blank" className="ml-1 text-blue-600 underline">腾讯云部署文档</a>。
             </p>
           </div>
           <div className="rounded-lg border border-green-200 bg-green-50 p-3">

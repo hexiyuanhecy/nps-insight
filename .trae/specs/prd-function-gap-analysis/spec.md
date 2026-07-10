@@ -177,19 +177,22 @@ const isMentioned = message.mentions?.some(
 
 ### 修复2：定时任务未触发
 
+> **部署环境变更**：项目已从 Vercel 迁移到腾讯云开发（CloudBase），定时任务配置方式相应调整。
+
 **问题根因**：
-1. vercel.json中缺少crons配置
-2. 用户配置的定时时间未同步到Vercel
+1. 之前 Vercel 部署时 `vercel.json` 缺少 crons 配置
+2. 用户配置的定时时间未同步到调度器
 
 **修复方案**：
-1. 在 `vercel.json` 中添加默认的crons配置（每周一09:00同步、每月1日00:00分析）
-2. 实现定时任务配置的动态同步机制，当用户修改定时时间后自动更新Vercel配置
-3. 添加定时任务状态监控和日志
+1. ~~在 `vercel.json` 中添加默认的crons配置~~（已废弃，改为腾讯云触发器）
+2. **腾讯云方案**：在腾讯云函数控制台创建定时触发器（详见 [tencent-scf-triggers.json](file:///Users/xigua/ai Projects/nps-insight/tencent-scf-triggers.json)）
+3. Cron API 改造为支持腾讯云 User-Agent 识别（详见 [sync/route.ts](file:///Users/xigua/ai Projects/nps-insight/src/app/api/cron/sync/route.ts#L24-L67)）
+4. 提供一键部署脚本 [deploy-tencent.sh](file:///Users/xigua/ai Projects/nps-insight/scripts/deploy-tencent.sh)
 
 **验收标准**：
-- AC-CRON-01：vercel.json包含正确的crons配置
+- AC-CRON-01：腾讯云函数控制台已配置定时触发器
 - AC-CRON-02：默认定时任务能按计划触发
-- AC-CRON-03：用户修改定时时间后，新配置能生效
+- AC-CRON-03：手动 curl 触发任务能正常执行
 
 ## Acceptance Criteria
 
@@ -211,25 +214,25 @@ const isMentioned = message.mentions?.some(
 - **Then**：能正确验证凭证有效性并给出反馈
 - **Verification**: `programmatic`
 
-### AC-CRON-01：Vercel Cron配置存在
-- **Given**：项目已部署到Vercel
-- **When**：查看vercel.json文件
-- **Then**：文件中包含crons配置，定义了周同步和月分析任务
+### AC-CRON-01：腾讯云定时触发器已配置
+- **Given**：项目已部署到腾讯云开发环境
+- **When**：登录腾讯云控制台查看函数触发器
+- **Then**：可见 `weekly-sync-trigger` 和 `monthly-analysis-trigger` 两个启用的触发器
 - **Verification**: `programmatic`
 
 ### AC-CRON-02：默认定时任务触发
-- **Given**：系统已部署且配置正确
+- **Given**：系统已部署到腾讯云且配置正确
 - **When**：到达预定时间（每周一09:00或每月1日00:00）
 - **Then**：系统自动执行对应的任务并发送通知
 - **Verification**: `programmatic`
 
-### AC-CRON-03：用户配置定时时间生效
-- **Given**：用户在配置中心修改了定时任务时间
-- **When**：保存配置并重新部署
-- **Then**：新的定时时间生效
+### AC-CRON-03：手动触发 API 正常
+- **Given**：用户有 CRON_SECRET 或在开发环境
+- **When**：通过 curl 调用 `/api/cron/sync` 或 `/api/cron/monthly`
+- **Then**：任务能正常执行并返回结果
 - **Verification**: `programmatic`
 
 ## Open Questions
 - [ ] 用户当前飞书应用的Bot名称是什么？（用于验证修复）
 - [ ] 用户在飞书后台配置的Webhook地址是什么？（用于验证修复）
-- [ ] 定时任务是否需要支持动态更新而不需要重新部署？（影响技术方案选择）
+- [ ] 腾讯云触发器是否需要在 CloudBase CLI 中配置，还是手动在控制台配置？

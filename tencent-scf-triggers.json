@@ -1,0 +1,42 @@
+{
+  "_comment": "腾讯云函数（SCF）定时触发器配置。部署时通过 CloudBase CLI 或控制台导入。",
+  "_usage": "在腾讯云开发控制台 → 云函数 → NPS-Insight-Function → 触发管理 → 创建触发器 时使用以下配置",
+  "triggers": [
+    {
+      "name": "weekly-sync-trigger",
+      "description": "周同步任务：每周一09:00（北京时间）执行数据拉取和AI打标",
+      "type": "timer",
+      "cronExpression": "0 0 9 ? * MON",
+      "enable": true,
+      "argument": "{\"task\":\"weekly-sync\"}",
+      "targetFunction": "NPS-Insight-Function",
+      "targetRoute": "/api/cron/sync",
+      "method": "GET",
+      "headers": {
+        "User-Agent": "TencentCloud-SCF-Timer/1.0",
+        "X-Cron-Source": "tencent-cloud-scf"
+      }
+    },
+    {
+      "name": "monthly-analysis-trigger",
+      "description": "月度分析任务：每月1日00:00（北京时间）执行标签自进化和Top问题分析",
+      "type": "timer",
+      "cronExpression": "0 0 0 1 * ?",
+      "enable": true,
+      "argument": "{\"task\":\"monthly-analysis\"}",
+      "targetFunction": "NPS-Insight-Function",
+      "targetRoute": "/api/cron/monthly",
+      "method": "GET",
+      "headers": {
+        "User-Agent": "TencentCloud-SCF-Timer/1.0",
+        "X-Cron-Source": "tencent-cloud-scf"
+      }
+    }
+  ],
+  "_cron_format_explanation": {
+    "standard_cron": "分 时 日 月 星期（Vercel/Unix 风格）",
+    "scf_cron": "分 时 日 月 星期 年（腾讯云 SCF 风格，6位）",
+    "weekly_sync_v2": "0 0 9 ? * MON *（SCF 6位格式）",
+    "monthly_analysis_v2": "0 0 0 1 * ? *（SCF 6位格式）"
+  }
+}
