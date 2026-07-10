@@ -3,5 +3,28 @@
   "devCommand": "next dev",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "regions": ["hkg1"]
+  "regions": ["hkg1"],
+  "functions": {
+    "src/app/api/cron/**": {
+      "maxDuration": 120
+    },
+    "src/app/api/evolution/**": {
+      "maxDuration": 60
+    },
+    "src/app/api/diagnostics/**": {
+      "maxDuration": 60
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/sync",
+      "schedule": "0 1 * * 1",
+      "description": "周同步任务：每周一01:00 UTC（北京时间09:00）执行数据拉取和AI打标"
+    },
+    {
+      "path": "/api/cron/monthly",
+      "schedule": "0 16 1 * *",
+      "description": "月度分析任务：每月1日16:00 UTC（北京时间00:00）执行标签自进化和Top问题分析"
+    }
+  ]
 }

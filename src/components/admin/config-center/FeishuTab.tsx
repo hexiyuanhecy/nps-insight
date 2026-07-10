@@ -418,6 +418,39 @@ export function FeishuTab({ ctrl }: FeishuTabProps) {
         <p className="mt-2 text-xs text-slate-500">已选中：{config.tagging.largeTenantLevels.length > 0 ? config.tagging.largeTenantLevels.join('、') : '未选择（默认所有租户同等权重）'}</p>
       </section>
 
+      {/* 飞书Bot Webhook配置 */}
+      <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <SectionTitle icon={<BarChart3 className="h-5 w-5" />} title="飞书Bot Webhook配置" desc="配置飞书机器人消息事件接收端点，用于响应@Bot命令和群消息" />
+        <div className="space-y-4">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+            <p className="text-sm font-medium text-blue-800">飞书Bot Webhook地址</p>
+            <p className="mt-2 font-mono text-sm text-blue-600 break-all">
+              {process.env.VERCEL_URL 
+                ? `https://${process.env.VERCEL_URL}/api/webhook/feishu` 
+                : 'http://localhost:3002/api/webhook/feishu'}
+            </p>
+            <p className="mt-2 text-xs text-blue-700">
+              将此地址配置到飞书开放平台 → 应用 → 事件订阅 → 事件回调URL
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs text-slate-600">
+              <span className="font-medium">💡 注意：</span>
+              此Webhook用于接收飞书Bot的消息事件（@Bot消息、入群通知等），与数据源Webhook（接收外部反馈推送）是不同的端点。
+            </p>
+          </div>
+          <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+            <p className="text-xs text-green-700">
+              <span className="font-medium">📋 需订阅的事件：</span>
+              <ul className="mt-1 list-disc pl-4 space-y-0.5">
+                <li>im.message.receive_v1（接收消息事件）</li>
+                <li>im.chat.member.bot.added_v1（机器人入群事件）</li>
+              </ul>
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* 飞书多维表格绑定/新建 */}
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <div className="mb-4 flex items-start justify-between">

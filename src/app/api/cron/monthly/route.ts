@@ -15,8 +15,29 @@ export type { MonthlyTaskResult };
 /**
  * GET /api/cron/monthly
  * 执行月度任务
+ * 
+ * Vercel Cron会添加 x-vercel-id 和 x-vercel-signature 头
+ * 同时支持手动触发时的 CRON_SECRET 认证
  */
 export async function GET(request: NextRequest): Promise<NextResponse<MonthlyTaskResult>> {
+  // 验证授权：支持两种方式
+  // 1. Vercel Cron触发（通过x-vercel-id头判断）
+  // 2. 手动触发（通过CRON_SECRET认证）
+  const vercelId = request.headers.get('x-vercel-id');
+  const authHeader = request.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+
+  // 如果配置了CRON_SECRET，且不是Vercel Cron触发，则需要验证
+  if (cronSecret && !vercelId) {
+    const token = authHeader?.replace('Bearer ', '');
+    if (token !== cronSecret) {
+      return NextResponse.json(
+        { success: false, error: '未授权的访问', timestamp: Date.now(), evolution: null, topIssues: null, formulaSync: false, meetingDoc: null, notification: false } as MonthlyTaskResult,
+        { status: 401 }
+      );
+    }
+  }
+
   const result = await runMonthlyTask();
   return NextResponse.json(result);
 }

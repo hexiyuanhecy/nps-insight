@@ -120,10 +120,27 @@ async function handleMessageEvent(event: FeishuWebhookEvent): Promise<void> {
   const text = content.text || ''
 
   // 检查是否是@Bot的消息
+  // 飞书消息中@机器人时，mentions中会包含bot_id字段或name字段
+  // 兼容多种识别方式：
+  // 1. 检查mentions中是否包含bot_id（最可靠）
+  // 2. 检查mentions中是否包含app_id（飞书应用标识）
+  // 3. 检查mentions的key是否包含@_user_模式（飞书@标识）
+  // 4. 检查名称是否包含应用相关关键词（向后兼容）
+  const appId = process.env.FEISHU_APP_ID || '';
   const isMentioned = message.mentions?.some(
-    (m) =>
-      m.name.toLowerCase().includes('nps') ||
-      m.name.toLowerCase().includes('insight')
+    (m) => {
+      if (m.bot_id) {
+        return true;
+      }
+      if (m.app_id === appId) {
+        return true;
+      }
+      if (m.key && m.key.startsWith('@_user_')) {
+        return true;
+      }
+      const name = (m.name || '').toLowerCase();
+      return name.includes('nps') || name.includes('insight');
+    }
   )
 
   // 清理文本（移除@提及）

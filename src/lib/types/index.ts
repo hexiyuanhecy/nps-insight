@@ -354,6 +354,10 @@ export interface FeishuWebhookEvent {
       };
       name: string;
       tenant_key: string;
+      /** Bot ID（@机器人时会包含此字段） */
+      bot_id?: string;
+      /** 应用ID（@应用时会包含此字段） */
+      app_id?: string;
     }>;
   };
 }
